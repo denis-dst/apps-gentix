@@ -1,0 +1,45 @@
+name: gentix_officer_app
+description: "GenTix Officer App for Ticketing and Gate Control"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.6
+  dio: ^5.4.0
+  flutter_secure_storage: ^10.0.0
+  provider: ^6.1.1
+  mobile_scanner: ^7.2.0
+  intl: ^0.20.2
+  google_fonts: ^8.1.0
+  animate_do: ^5.1.0
+  lottie: ^3.0.0
+  shimmer: ^3.0.0
+  flutter_svg: ^2.0.9
+  awesome_snackbar_content: ^0.1.3
+  vibration: ^3.1.8
+  sqflite: ^2.3.0
+  path: ^1.8.3
+  cached_network_image: ^3.3.0
+  pretty_dio_logger: ^1.3.1
+  shared_preferences: ^2.2.2
+  image_picker: ^1.0.7
+  camera: ^0.11.0+1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
+  # To add assets, uncomment and list them
+  # assets:
+  #   - assets/images/
+  #   - assets/lottie/
