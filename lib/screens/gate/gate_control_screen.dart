@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../../providers/settings_provider.dart';
 import '../../core/api_client.dart';
 import '../../models/gate_model.dart';
+import '../../models/event_model.dart';
 
 class GateControlScreen extends StatefulWidget {
   const GateControlScreen({super.key});
@@ -32,6 +33,14 @@ class _GateControlScreenState extends State<GateControlScreen> {
     final event = context.read<EventProvider>().selectedEvent;
     if (event == null) return;
     await context.read<GateProvider>().fetchGates(event.id);
+    if (mounted) {
+      final gates = context.read<GateProvider>().gates;
+      if (gates.isNotEmpty) {
+        setState(() {
+          _selectedGate = gates.first;
+        });
+      }
+    }
   }
 
   @override
@@ -39,10 +48,6 @@ class _GateControlScreenState extends State<GateControlScreen> {
     final eventProvider = context.watch<EventProvider>();
     final gateProvider = context.watch<GateProvider>();
     final event = eventProvider.selectedEvent;
-
-    if (_selectedGate == null && gateProvider.gates.isNotEmpty) {
-      _selectedGate = gateProvider.gates.first;
-    }
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -67,34 +72,31 @@ class _GateControlScreenState extends State<GateControlScreen> {
               children: [
                 const SizedBox(height: 20),
                 
-                // Event Dropdown
-                _buildDropdown<String>(
-                  label: 'Event',
-                  value: event?.name ?? 'No Event Selected',
-                  items: [event?.name ?? 'No Event Selected'],
-                  displayBuilder: (val) => Text(val),
-                  onChanged: (v) {},
+                // Event Information Card
+                _buildEventCard(event),
+                
+                const SizedBox(height: 24),
+                
+                // Gate Selection
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    "Pilih Gate",
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: Colors.black87,
+                    ),
+                  ),
                 ),
-                
-                const SizedBox(height: 16),
-                
-                // Event Info (Venue & Date)
-                _buildReadOnlyField(
-                  label: 'Information',
-                  value: event != null 
-                    ? '${event.venue} | ${DateFormat('dd MMM yyyy, HH:mm').format(event.eventStartDate)}'
-                    : 'N/A',
-                ),
-                
-                const SizedBox(height: 16),
-                
-                // Gate Dropdown
+                const SizedBox(height: 8),
                 _buildDropdown<GateModel>(
                   label: 'Gate',
                   value: _selectedGate,
                   items: gateProvider.gates,
                   displayBuilder: (gate) => Text(gate.name),
                   onChanged: (v) => setState(() => _selectedGate = v),
+                  icon: Icons.door_sliding_outlined,
                 ),
                 
                 const SizedBox(height: 32),
@@ -142,16 +144,24 @@ class _GateControlScreenState extends State<GateControlScreen> {
                       );
                     },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.grey[300],
-                      foregroundColor: Colors.black54,
-                      elevation: 0,
+                      backgroundColor: AppConstants.primaryColor,
+                      foregroundColor: Colors.white,
+                      elevation: 4,
+                      shadowColor: AppConstants.primaryColor.withOpacity(0.5),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(16),
                       ),
                     ),
-                    child: const Text(
-                      'Scan Barcode',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w400),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.qr_code_scanner_rounded),
+                        SizedBox(width: 12),
+                        Text(
+                          'Scan Barcode',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -162,53 +172,119 @@ class _GateControlScreenState extends State<GateControlScreen> {
     );
   }
 
+  Widget _buildEventCard(EventModel? event) {
+    if (event == null) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: AppConstants.primaryGradient,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: AppConstants.primaryColor.withOpacity(0.3),
+            blurRadius: 15,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.event_available, color: Colors.white70, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                "Event Terpilih",
+                style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12, fontWeight: FontWeight.w500),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            event.name,
+            style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              const Icon(Icons.location_on_outlined, color: Colors.white70, size: 16),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  event.venue,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              const Icon(Icons.calendar_today_outlined, color: Colors.white70, size: 16),
+              const SizedBox(width: 4),
+              Text(
+                DateFormat('dd MMMM yyyy, HH:mm').format(event.eventStartDate),
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDropdown<T>({
     required String label,
     required T? value,
     required List<T> items,
     required Widget Function(T) displayBuilder,
     required Function(T?) onChanged,
+    IconData? icon,
   }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.grey[300]!),
-            borderRadius: BorderRadius.circular(8),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: Colors.grey[300]!),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<T>(
-              isExpanded: true,
-              value: value,
-              items: items.map((T item) {
-                return DropdownMenuItem<T>(
-                  value: item,
-                  child: displayBuilder(item),
-                );
-              }).toList(),
-              onChanged: onChanged,
-              icon: const Icon(Icons.unfold_more_rounded, color: Colors.grey),
+        ],
+      ),
+      child: Row(
+        children: [
+          if (icon != null) ...[
+            Icon(icon, color: AppConstants.primaryColor, size: 22),
+            const SizedBox(width: 12),
+          ],
+          Expanded(
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<T>(
+                isExpanded: true,
+                value: value,
+                hint: Text("Pilih $label", style: TextStyle(color: Colors.grey[400])),
+                items: items.map((T item) {
+                  return DropdownMenuItem<T>(
+                    value: item,
+                    child: displayBuilder(item),
+                  );
+                }).toList(),
+                onChanged: onChanged,
+                icon: const Icon(Icons.keyboard_arrow_down_rounded, color: AppConstants.primaryColor),
+                style: const TextStyle(color: Colors.black87, fontSize: 16),
+              ),
             ),
           ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildReadOnlyField({required String label, required String value}) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      decoration: BoxDecoration(
-        color: Colors.grey[50]!,
-        border: Border.all(color: Colors.grey[200]!),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        value,
-        style: TextStyle(color: Colors.grey[400]),
+        ],
       ),
     );
   }
@@ -221,23 +297,32 @@ class _GateControlScreenState extends State<GateControlScreen> {
   }) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(vertical: 16),
         decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border.all(color: isActive ? AppConstants.primaryColor : Colors.grey[200]!),
-          borderRadius: BorderRadius.circular(12),
+          color: isActive ? AppConstants.primaryColor.withOpacity(0.05) : Colors.white,
+          border: Border.all(
+            color: isActive ? AppConstants.primaryColor : Colors.grey[200]!,
+            width: isActive ? 2 : 1,
+          ),
+          borderRadius: BorderRadius.circular(16),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: isActive ? AppConstants.primaryColor : Colors.grey[400], size: 20),
+            Icon(
+              icon,
+              color: isActive ? AppConstants.primaryColor : Colors.grey[400],
+              size: 20
+            ),
             const SizedBox(width: 8),
             Text(
               title,
               style: TextStyle(
                 color: isActive ? AppConstants.primaryColor : Colors.grey[400],
-                fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
+                fontSize: 15,
               ),
             ),
           ],
