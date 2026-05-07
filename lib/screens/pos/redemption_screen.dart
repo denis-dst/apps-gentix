@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -25,7 +26,9 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
   bool _isScanningTicket = true;
   bool _showTicketInfo = false;
   bool _isTakingPhoto = false;
-  bool _isScanningWristband = false;
+  bool _showPhotoPreview = false;
+  int _photoCountdown = 3;
+  Timer? _photoTimer;
   bool _useCameraScanner = true;
 
   CameraController? _cameraController;
@@ -49,6 +52,7 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
 
   @override
   void dispose() {
+    _photoTimer?.cancel();
     _cameraController?.dispose();
     _scannerController.dispose();
     _manualController.dispose();
@@ -62,7 +66,9 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
 
     if (_isScanningTicket) {
       final success = await context.read<POSProvider>().checkTicket(code);
-      if (success) {
+      final provider = context.read<POSProvider>();
+      
+      if (success || provider.ticketInfo != null) {
         setState(() {
           _ticketCode = code;
           _isScanningTicket = false;
@@ -71,15 +77,38 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
         });
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.read<POSProvider>().message ?? 'Invalid Ticket')),
+          SnackBar(content: Text(provider.message ?? 'Invalid Ticket')),
         );
       }
-    } else if (_isScanningWristband) {
+    }
+  }
+
+  void _startPhotoTimer() {
+    setState(() => _photoCountdown = 3);
+    _photoTimer?.cancel();
+    _photoTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       setState(() {
-        _wristbandQr = code;
-        _isScanningWristband = false;
-        _manualController.clear();
+        if (_photoCountdown > 1) {
+          _photoCountdown--;
+        } else {
+          _photoTimer?.cancel();
+          _takePicture();
+        }
       });
+    });
+  }
+
+  Future<void> _takePicture() async {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) return;
+    try {
+      final file = await _cameraController!.takePicture();
+      setState(() {
+        _personPhoto = file;
+        _isTakingPhoto = false;
+        _showPhotoPreview = true;
+      });
+    } catch (e) {
+      debugPrint("Error taking picture: $e");
     }
   }
 
@@ -93,7 +122,7 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
         title: const Text('Ticket Redemption'),
         backgroundColor: Colors.transparent,
         actions: [
-          if (_isScanningTicket || _isScanningWristband)
+          if (_isScanningTicket)
             IconButton(
               icon: Icon(_useCameraScanner ? Icons.keyboard : Icons.camera_alt),
               onPressed: () => setState(() => _useCameraScanner = !_useCameraScanner),
@@ -106,7 +135,7 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
           Expanded(
             child: Stack(
               children: [
-                if (_isScanningTicket || _isScanningWristband)
+                if (_isScanningTicket)
                   _useCameraScanner
                     ? MobileScanner(
                         controller: _scannerController,
@@ -123,8 +152,8 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
                   _buildTicketInfo(posProvider.ticketInfo)
                 else if (_isTakingPhoto)
                   _buildCameraPreview()
-                else if (_personPhoto != null && _wristbandQr != null)
-                  _buildFinalConfirmation(posProvider),
+                else if (_showPhotoPreview)
+                  _buildPhotoPreview(posProvider),
 
                 if (posProvider.isLoading)
                   const Center(child: CircularProgressIndicator()),
@@ -147,9 +176,7 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
         children: [
           _buildStepIcon(1, 'Ticket', _isScanningTicket || _showTicketInfo),
           _buildStepDivider(),
-          _buildStepIcon(2, 'Photo', _isTakingPhoto),
-          _buildStepDivider(),
-          _buildStepIcon(3, 'Wristband', _isScanningWristband || (_wristbandQr != null && !(_isScanningTicket || _showTicketInfo || _isTakingPhoto))),
+          _buildStepIcon(2, 'Photo & Redeem', _isTakingPhoto || _showPhotoPreview),
         ],
       ),
     );
@@ -208,23 +235,40 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
                   children: [
                     const Icon(Icons.confirmation_number, color: AppConstants.primaryColor, size: 48),
                     const SizedBox(height: 16),
-                    Text(info['customer_name'] ?? 'Unknown Customer', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-                    Text(info['category_name'] ?? 'General Admission', style: const TextStyle(color: Colors.grey)),
+                    Text(info['name'] ?? 'Unknown Customer', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+                    Text(info['category'] ?? 'General Admission', style: const TextStyle(color: Colors.grey)),
                     const Divider(height: 32, color: Colors.white10),
-                    _buildInfoRow('Email', info['customer_email'] ?? '-'),
-                    _buildInfoRow('Status', info['status'] ?? 'Valid'),
+                    _buildInfoRow('Email', info['email'] ?? '-'),
+                    _buildInfoRow('Phone', info['phone'] ?? '-'),
+                    if (info['redeemed_at'] != null) ...[
+                      const Divider(height: 32, color: Colors.white10),
+                      const Text('ALREADY REDEEMED', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                      _buildInfoRow('At', info['redeemed_at']),
+                      _buildInfoRow('By', info['redeemed_by'] ?? 'System'),
+                      if (info['photo'] != null) ...[
+                        const SizedBox(height: 16),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.network(info['photo'], height: 150, width: double.infinity, fit: BoxFit.cover),
+                        ),
+                      ],
+                    ],
                   ],
                 ),
               ),
             ),
           ),
           const Spacer(),
-          ElevatedButton(
-            onPressed: () => setState(() {
-              _showTicketInfo = false;
-              _isTakingPhoto = true;
-            }),
-            child: const Text('CONTINUE TO PHOTO'),
+            onPressed: info['redeemed_at'] != null 
+              ? _reset 
+              : () {
+                  setState(() {
+                    _showTicketInfo = false;
+                    _isTakingPhoto = true;
+                  });
+                  _startPhotoTimer();
+                },
+            child: Text(info['redeemed_at'] != null ? 'BACK TO SCAN' : 'CONTINUE TO PHOTO'),
           ),
         ],
       ),
@@ -232,68 +276,81 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
   }
 
   Widget _buildCameraPreview() {
-    if (_cameraController == null || !_cameraController!.value.isInitialized) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    return Column(
+    return Stack(
       children: [
-        Expanded(
-          child: Container(
-            margin: const EdgeInsets.all(24),
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(24)),
-            child: CameraPreview(_cameraController!),
-          ),
+        Column(
+          children: [
+            Expanded(
+              child: Container(
+                margin: const EdgeInsets.all(24),
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(borderRadius: BorderRadius.circular(24)),
+                child: CameraPreview(_cameraController!),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.only(bottom: 40),
+              child: FloatingActionButton.large(
+                backgroundColor: Colors.white,
+                onPressed: () {
+                  _photoTimer?.cancel();
+                  _takePicture();
+                },
+                child: const Icon(Icons.camera_alt, color: Colors.black, size: 32),
+              ),
+            ),
+          ],
         ),
-        Container(
-          padding: const EdgeInsets.only(bottom: 40),
-          child: FloatingActionButton.large(
-            backgroundColor: Colors.white,
-            onPressed: () async {
-              final file = await _cameraController!.takePicture();
-              setState(() {
-                _personPhoto = file;
-                _isTakingPhoto = false;
-                _isScanningWristband = true;
-                _useCameraScanner = true;
-              });
-            },
-            child: const Icon(Icons.camera_alt, color: Colors.black, size: 32),
+        Center(
+          child: Text(
+            '$_photoCountdown',
+            style: const TextStyle(fontSize: 120, fontWeight: FontWeight.bold, color: Colors.white70),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildFinalConfirmation(POSProvider provider) {
+  Widget _buildPhotoPreview(POSProvider provider) {
     return Padding(
       padding: const EdgeInsets.all(24.0),
       child: Column(
         children: [
           Expanded(
-            child: SingleChildScrollView(
-              child: Column(
-                children: [
-                  Container(
-                    decoration: BoxDecoration(
-                      border: Border.all(color: AppConstants.primaryColor, width: 2),
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: Image.file(File(_personPhoto!.path), height: 250, width: double.infinity, fit: BoxFit.cover),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  _buildSummaryItem('Ticket', _ticketCode!),
-                  _buildSummaryItem('Wristband', _wristbandQr!),
-                ],
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: AppConstants.primaryColor, width: 2),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Image.file(File(_personPhoto!.path), width: double.infinity, fit: BoxFit.cover),
               ),
             ),
           ),
-          ElevatedButton(
-            onPressed: _processRedemption,
-            child: const Text('CONFIRM REDEMPTION'),
+          const SizedBox(height: 24),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () {
+                    setState(() {
+                      _showPhotoPreview = false;
+                      _isTakingPhoto = true;
+                    });
+                    _startPhotoTimer();
+                  },
+                  child: const Text('FOTO ULANG'),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: _processRedemption,
+                  child: const Text('CONFIRM REDEEM'),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -321,7 +378,6 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
 
     await context.read<POSProvider>().redeemTicket(
       ticketCode: _ticketCode!,
-      wristbandQr: _wristbandQr!,
       photoBase64: photoBase64,
     );
   }
@@ -346,10 +402,34 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
           children: [
             Icon(success ? Icons.check_circle : Icons.error, color: success ? Colors.green : Colors.red, size: 80),
             const SizedBox(height: 16),
-            Text(provider.message ?? '', style: const TextStyle(fontSize: 18, color: Colors.white), textAlign: TextAlign.center),
+            Text(provider.message ?? '', style: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+            if (!success && provider.ticketInfo != null) ...[
+              const SizedBox(height: 24),
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 40),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12)),
+                child: Column(
+                  children: [
+                    _buildInfoRow('Time', provider.ticketInfo!['redeemed_at'] ?? '-'),
+                    _buildInfoRow('By', provider.ticketInfo!['redeemed_by'] ?? 'System'),
+                    if (provider.ticketInfo!['photo'] != null) ...[
+                      const SizedBox(height: 12),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.network(provider.ticketInfo!['photo'], height: 120, width: double.infinity, fit: BoxFit.cover),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
             if (!success) ...[
               const SizedBox(height: 32),
-              ElevatedButton(onPressed: () => provider.clearStatus(), child: const Text('TRY AGAIN')),
+              ElevatedButton(onPressed: () {
+                _reset();
+                provider.clearStatus();
+              }, child: const Text('CLOSE')),
             ],
           ],
         ),
@@ -365,7 +445,7 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
       _isScanningTicket = true;
       _showTicketInfo = false;
       _isTakingPhoto = false;
-      _isScanningWristband = false;
+      _showPhotoPreview = false;
     });
   }
 

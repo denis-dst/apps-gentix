@@ -3,10 +3,13 @@ import '../core/api_client.dart';
 import 'package:dio/dio.dart';
 
 import '../providers/settings_provider.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:vibration/vibration.dart';
 
 class POSProvider extends ChangeNotifier {
   final SettingsProvider settings;
   late ApiClient _apiClient;
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
   POSProvider(this.settings) {
     _apiClient = ApiClient(settings.baseUrl);
@@ -30,13 +33,26 @@ class POSProvider extends ChangeNotifier {
 
     try {
       final response = await _apiClient.dio.get('/pos/check-ticket/$code');
+      
+      if (response.data['status'] == 'error' && response.data['is_redeemable'] == false) {
+        _ticketInfo = response.data['details'];
+        _message = response.data['message'];
+        _isSuccess = false;
+        await _audioPlayer.play(AssetSource('sounds/invalid.mp3'));
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+
       _ticketInfo = response.data['ticket'];
+      await _audioPlayer.play(AssetSource('sounds/success.mp3'));
       _isLoading = false;
       notifyListeners();
       return true;
     } on DioException catch (e) {
       _isLoading = false;
       _message = e.response?.data['message'] ?? 'Ticket not found';
+      await _audioPlayer.play(AssetSource('sounds/invalid.mp3'));
       notifyListeners();
       return false;
     } catch (e) {
@@ -49,7 +65,7 @@ class POSProvider extends ChangeNotifier {
 
   Future<void> redeemTicket({
     required String ticketCode,
-    required String wristbandQr,
+    String? wristbandQr,
     String? photoBase64,
   }) async {
     _isLoading = true;
@@ -60,15 +76,23 @@ class POSProvider extends ChangeNotifier {
     try {
       final response = await _apiClient.dio.post('/pos/redeem', data: {
         'ticket_code': ticketCode,
-        'wristband_qr': wristbandQr,
         'photo': photoBase64,
       });
 
-      _isSuccess = true;
-      _message = response.data['message'] ?? 'Redemption Successful';
+      if (response.data['status'] == 'error') {
+        _isSuccess = false;
+        _message = response.data['message'];
+        _ticketInfo = response.data['details'];
+        await _audioPlayer.play(AssetSource('sounds/invalid.mp3'));
+      } else {
+        _isSuccess = true;
+        _message = response.data['message'] ?? 'Redemption Successful';
+        await _audioPlayer.play(AssetSource('sounds/success.mp3'));
+      }
     } on DioException catch (e) {
       _isSuccess = false;
       _message = e.response?.data['message'] ?? 'Redemption Failed';
+      await _audioPlayer.play(AssetSource('sounds/invalid.mp3'));
     } finally {
       _isLoading = false;
       notifyListeners();
