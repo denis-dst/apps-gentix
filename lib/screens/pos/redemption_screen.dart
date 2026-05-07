@@ -259,6 +259,7 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
             ),
           ),
           const Spacer(),
+          ElevatedButton(
             onPressed: info['redeemed_at'] != null 
               ? _reset 
               : () {
