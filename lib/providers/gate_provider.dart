@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../core/api_client.dart';
 import 'package:dio/dio.dart';
 import 'package:vibration/vibration.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 import '../providers/settings_provider.dart';
 
@@ -10,6 +11,7 @@ import '../models/gate_model.dart';
 class GateProvider extends ChangeNotifier {
   final SettingsProvider settings;
   late ApiClient _apiClient;
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
   GateProvider(this.settings) {
     _apiClient = ApiClient(settings.baseUrl);
@@ -67,6 +69,9 @@ class GateProvider extends ChangeNotifier {
       _isSuccess = true;
       _message = response.data['message'] ?? 'Access Granted';
       
+      // Sound feedback
+      await _audioPlayer.play(AssetSource('sounds/success.mp3'));
+      
       // Haptic feedback
       if (await Vibration.hasVibrator() ?? false) {
         Vibration.vibrate(duration: 100);
@@ -75,6 +80,9 @@ class GateProvider extends ChangeNotifier {
     } on DioException catch (e) {
       _isSuccess = false;
       _message = e.response?.data['message'] ?? 'Access Denied';
+      
+      // Sound feedback
+      await _audioPlayer.play(AssetSource('sounds/invalid.mp3'));
       
       // Stronger haptic for error
       if (await Vibration.hasVibrator() ?? false) {

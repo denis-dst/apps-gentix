@@ -31,15 +31,28 @@ dependencies:
   shared_preferences: ^2.2.2
   image_picker: ^1.0.7
   camera: ^0.11.0+1
+  audioplayers: ^5.2.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.1
+  flutter_launcher_icons: "^0.13.1"
+  flutter_native_splash: "^2.3.11"
 
 flutter:
   uses-material-design: true
-  # To add assets, uncomment and list them
-  # assets:
-  #   - assets/images/
-  #   - assets/lottie/
+  assets:
+    - assets/images/
+    - assets/sounds/
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/logo.png"
+
+flutter_native_splash:
+  color: "#010409"
+  image: assets/images/logo.png
+  android: true
+  ios: true
