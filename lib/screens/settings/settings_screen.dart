@@ -82,6 +82,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 onChanged: (val) => settings.setApiUrl(val),
               ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  ActionChip(
+                    label: const Text('Online Preset'),
+                    onPressed: () {
+                      _urlController.text = AppConstants.onlineApiUrl;
+                      settings.setApiUrl(AppConstants.onlineApiUrl);
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  ActionChip(
+                    label: const Text('Local Preset'),
+                    onPressed: () {
+                      _urlController.text = AppConstants.localApiUrl;
+                      settings.setApiUrl(AppConstants.localApiUrl);
+                    },
+                  ),
+                ],
+              ),
             ] else ...[
               const Text('Local Server IP'),
               const SizedBox(height: 8),
@@ -124,6 +144,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ? const CircularProgressIndicator(color: Colors.white)
                       : const Text('Test Connection'),
                   ),
+                  if (settings.isConnected) ...[
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(double.infinity, 50),
+                      ),
+                      onPressed: () async {
+                        await settings.saveSettings();
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Settings Saved Successfully!')),
+                          );
+                          Navigator.pop(context);
+                        }
+                      },
+                      child: const Text('Save Connection', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ],
                 ],
               ),
             ),
