@@ -6,8 +6,8 @@ class SettingsProvider extends ChangeNotifier {
   late SharedPreferences _prefs;
 
   bool _isOnline = true;
-  String _apiUrl = 'https://sekelik-news.com/gentix-apps/api';
-  String _localIp = '192.168.1.1';
+  String _apiUrl = 'http://192.168.202.253/gentix-apps/api';
+  String _localIp = '192.168.202.253';
   bool _isConnected = false;
 
   bool get isOnline => _isOnline;
@@ -26,29 +26,33 @@ class SettingsProvider extends ChangeNotifier {
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
     _isOnline = _prefs.getBool('isOnline') ?? true;
-    _apiUrl = _prefs.getString('apiUrl') ?? 'https://sekelik-news.com/gentix-apps/api';
-    _localIp = _prefs.getString('localIp') ?? '192.168.1.1';
+    _apiUrl = _prefs.getString('apiUrl') ?? 'http://192.168.202.253/gentix-apps/api';
+    _localIp = _prefs.getString('localIp') ?? '192.168.202.253';
     notifyListeners();
   }
 
   Future<void> setMode(bool online) async {
     _isOnline = online;
-    await _prefs.setBool('isOnline', online);
     _isConnected = false;
     notifyListeners();
   }
 
   Future<void> setApiUrl(String url) async {
     _apiUrl = url;
-    await _prefs.setString('apiUrl', url);
     _isConnected = false;
     notifyListeners();
   }
 
   Future<void> setLocalIp(String ip) async {
     _localIp = ip;
-    await _prefs.setString('localIp', ip);
     _isConnected = false;
+    notifyListeners();
+  }
+
+  Future<void> saveSettings() async {
+    await _prefs.setBool('isOnline', _isOnline);
+    await _prefs.setString('apiUrl', _apiUrl);
+    await _prefs.setString('localIp', _localIp);
     notifyListeners();
   }
 
