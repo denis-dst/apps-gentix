@@ -59,9 +59,9 @@ class GateProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _apiClient.updateBaseUrl(settings.baseUrl);
       final response = await _apiClient.dio.post('/gate/scan', data: {
-        'wristband_qr': qrCode,
+        'wristband_qr': scannedCode,
+        'ticket_code': scannedCode,
         'type': type,
         'gate_id': gateId,
         'gate_name': gateName,
