@@ -5,7 +5,6 @@ import '../../providers/auth_provider.dart';
 import '../../providers/event_provider.dart';
 import '../../core/constants.dart';
 import '../gate/gate_control_screen.dart';
-import '../gate/gate_scan_screen.dart';
 import '../pos/redemption_screen.dart';
 import '../pos/sell_ticket_screen.dart';
 

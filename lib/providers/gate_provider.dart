@@ -16,16 +16,22 @@ class GateProvider extends ChangeNotifier {
   GateProvider(this.settings) {
     _apiClient = ApiClient(settings.baseUrl);
   }
-  
+
   bool _isLoading = false;
   String? _message;
   bool? _isSuccess;
   List<GateModel> _gates = [];
+  int _totalScans = 0;
+  int _totalValidScans = 0;
+  int _totalInvalidScans = 0;
 
   bool get isLoading => _isLoading;
   String? get message => _message;
   bool? get isSuccess => _isSuccess;
   List<GateModel> get gates => _gates;
+  int get totalScans => _totalScans;
+  int get totalValidScans => _totalValidScans;
+  int get totalInvalidScans => _totalInvalidScans;
 
   Future<void> fetchGates(int eventId) async {
     _isLoading = true;
@@ -59,9 +65,10 @@ class GateProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      _apiClient.updateBaseUrl(settings.baseUrl);
       final response = await _apiClient.dio.post('/gate/scan', data: {
-        'wristband_qr': scannedCode,
-        'ticket_code': scannedCode,
+        'wristband_qr': qrCode,
+        'ticket_code': qrCode,
         'type': type,
         'gate_id': gateId,
         'gate_name': gateName,
@@ -70,24 +77,27 @@ class GateProvider extends ChangeNotifier {
 
       _isSuccess = true;
       _message = response.data['message'] ?? 'Access Granted';
-      
+      _totalScans++;
+      _totalValidScans++;
+
       // Sound feedback
       await _audioPlayer.play(AssetSource('sounds/success.mp3'));
-      
+
       // Haptic feedback
-      if (await Vibration.hasVibrator() ?? false) {
+      if (await Vibration.hasVibrator()) {
         Vibration.vibrate(duration: 100);
       }
-      
     } on DioException catch (e) {
       _isSuccess = false;
       _message = e.response?.data['message'] ?? 'Access Denied';
-      
+      _totalScans++;
+      _totalInvalidScans++;
+
       // Sound feedback
       await _audioPlayer.play(AssetSource('sounds/invalid.mp3'));
-      
+
       // Stronger haptic for error
-      if (await Vibration.hasVibrator() ?? false) {
+      if (await Vibration.hasVibrator()) {
         Vibration.vibrate(pattern: [0, 200, 100, 200]);
       }
     } finally {

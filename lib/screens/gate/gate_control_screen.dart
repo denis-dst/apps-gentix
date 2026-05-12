@@ -5,8 +5,6 @@ import '../../providers/gate_provider.dart';
 import '../../core/constants.dart';
 import 'gate_scan_screen.dart';
 import 'package:intl/intl.dart';
-import '../../providers/settings_provider.dart';
-import '../../core/api_client.dart';
 import '../../models/gate_model.dart';
 import '../../models/event_model.dart';
 
