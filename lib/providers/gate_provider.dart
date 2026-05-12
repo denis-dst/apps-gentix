@@ -33,6 +33,7 @@ class GateProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      _apiClient.updateBaseUrl(settings.baseUrl);
       final response = await _apiClient.dio.get('/gate/list', queryParameters: {'event_id': eventId});
       final List data = response.data['data'] ?? [];
       _gates = data.map((json) => GateModel.fromJson(json)).toList();
@@ -58,6 +59,7 @@ class GateProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      _apiClient.updateBaseUrl(settings.baseUrl);
       final response = await _apiClient.dio.post('/gate/scan', data: {
         'wristband_qr': qrCode,
         'type': type,

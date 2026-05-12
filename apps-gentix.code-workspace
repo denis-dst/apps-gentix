@@ -1,0 +1,15 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "D:/laragon/www/gentix-apps"
+		}
+	],
+	"settings": {
+		"chat.tools.terminal.autoApprove": {
+			"flutter": true
+		}
+	}
+}

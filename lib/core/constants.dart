@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 class AppConstants {
-  static const String appName = 'GenTix Officer';
+  static const String appName = 'GenTix Scann Apps';
   static const String onlineApiUrl = 'https://sekelik-news.com/gentix-apps/api';
   static const String localApiUrl = 'http://192.168.202.253/gentix-apps/api';
   static const String apiBaseUrl = localApiUrl; // Default to local as previously requested

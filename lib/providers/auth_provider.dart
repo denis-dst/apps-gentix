@@ -30,6 +30,7 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      _apiClient.updateBaseUrl(settings.baseUrl);
       final response = await _apiClient.dio.post('/login', data: {
         'email': email,
         'password': password,
@@ -59,6 +60,7 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> logout() async {
     try {
+      _apiClient.updateBaseUrl(settings.baseUrl);
       await _apiClient.dio.post('/logout');
     } catch (e) {
       // Ignore logout error
@@ -72,6 +74,7 @@ class AuthProvider extends ChangeNotifier {
     final token = await _storage.read(key: 'token');
     if (token != null) {
       try {
+        _apiClient.updateBaseUrl(settings.baseUrl);
         final response = await _apiClient.dio.get('/user');
         // Note: Backend /user endpoint returns the user object directly or nested
         // Adjusting based on common Laravel responses

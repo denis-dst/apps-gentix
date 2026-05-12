@@ -29,6 +29,7 @@ class EventProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      _apiClient.updateBaseUrl(settings.baseUrl);
       final response = await _apiClient.dio.get('/events');
       final List data = response.data;
       _events = data.map((json) => EventModel.fromJson(json)).toList();

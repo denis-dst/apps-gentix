@@ -32,6 +32,7 @@ class POSProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      _apiClient.updateBaseUrl(settings.baseUrl);
       final response = await _apiClient.dio.get('/pos/check-ticket/$code');
       
       if (response.data['status'] == 'error' && response.data['is_redeemable'] == false) {
@@ -74,6 +75,7 @@ class POSProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      _apiClient.updateBaseUrl(settings.baseUrl);
       final response = await _apiClient.dio.post('/pos/redeem', data: {
         'ticket_code': ticketCode,
         'photo': photoBase64,
@@ -113,6 +115,7 @@ class POSProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      _apiClient.updateBaseUrl(settings.baseUrl);
       final response = await _apiClient.dio.post('/pos/events/$eventId/sell', data: {
         'ticket_category_id': categoryId,
         'customer_name': name,

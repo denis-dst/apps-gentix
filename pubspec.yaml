@@ -1,4 +1,4 @@
-name: gentix_officer_app
+name: gentix_scan_apps
 description: "GenTix Officer App for Ticketing and Gate Control"
 publish_to: 'none'
 
