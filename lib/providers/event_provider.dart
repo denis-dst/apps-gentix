@@ -33,11 +33,13 @@ class EventProvider extends ChangeNotifier {
       final response = await _apiClient.dio.get('/events');
       final List data = response.data;
       _events = data.map((json) => EventModel.fromJson(json)).toList();
-      _isLoading = false;
-      notifyListeners();
     } on DioException catch (e) {
-      _isLoading = false;
       _error = e.response?.data['message'] ?? 'Failed to load events';
+    } catch (e) {
+      _error = 'Failed to parse event data: $e';
+      _events = [];
+    } finally {
+      _isLoading = false;
       notifyListeners();
     }
   }

@@ -19,7 +19,7 @@ class SettingsProvider extends ChangeNotifier {
     if (_isOnline) {
       return _apiUrl;
     } else {
-      return 'http://$_localIp/api';
+      return 'http://$_localIp/gentix-apps/api';
     }
   }
 
@@ -64,7 +64,7 @@ class SettingsProvider extends ChangeNotifier {
       ));
 
       // Simple health check or just ping the base url
-      final response = await dio.get('/health-check').catchError((e) {
+      await dio.get('/health-check').catchError((e) {
         // If 404, the server is there but endpoint doesn't exist, still "connected"
         if (e is DioException && e.response?.statusCode != null) {
           return e.response!;

@@ -11,13 +11,19 @@ import '../../core/constants.dart';
 
 class GateScanScreen extends StatefulWidget {
   final String type; // IN or OUT
-  final int gateId;
+  final int? gateId;
   final String gateName;
+  final int eventId;
+  final int tenantId;
+  final List<int> allowedCategoryIds;
   const GateScanScreen({
     super.key, 
     required this.type,
     required this.gateId,
     required this.gateName,
+    required this.eventId,
+    required this.tenantId,
+    required this.allowedCategoryIds,
   });
 
   @override
@@ -29,7 +35,7 @@ class _GateScanScreenState extends State<GateScanScreen> {
   final TextEditingController _manualController = TextEditingController();
   final FocusNode _manualFocusNode = FocusNode();
   bool _isProcessing = false;
-  bool _useCamera = false;
+  bool _useCamera = true;
   late String _scanType;
   final List<_ScanHistoryItem> _scanHistory = [];
 
@@ -37,11 +43,6 @@ class _GateScanScreenState extends State<GateScanScreen> {
   void initState() {
     super.initState();
     _scanType = widget.type;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && !_useCamera) {
-        _manualFocusNode.requestFocus();
-      }
-    });
   }
 
   @override
@@ -64,6 +65,9 @@ class _GateScanScreenState extends State<GateScanScreen> {
       gateId: widget.gateId,
       gateName: widget.gateName,
       deviceId: 'Android-Dev-01',
+      eventId: widget.eventId,
+      tenantId: widget.tenantId,
+      allowedCategoryIds: widget.allowedCategoryIds,
     );
 
     if (!mounted) return;
@@ -87,6 +91,15 @@ class _GateScanScreenState extends State<GateScanScreen> {
     });
   }
 
+  void _setScanInputMode(bool useCamera) {
+    setState(() => _useCamera = useCamera);
+    if (!useCamera) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _manualFocusNode.requestFocus();
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final gateProvider = context.watch<GateProvider>();
@@ -95,23 +108,25 @@ class _GateScanScreenState extends State<GateScanScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFEAF8FF),
-      body: Stack(
-        children: [
-          SafeArea(
-            child: Column(
-              children: [
-                _buildTopBar(settings),
-                _buildEventBar(event?.name ?? 'Gate Control'),
-                Expanded(
-                  child: _useCamera ? _buildCameraScanner() : _buildReadyToScan(),
-                ),
-                _buildHistorySection(),
-              ],
+      body: SafeArea(
+        child: Column(
+          children: [
+            _buildTopBar(settings),
+            _buildEventBar(event?.name ?? 'Gate Control'),
+            Expanded(
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: _useCamera ? _buildCameraScanner() : _buildReadyToScan(),
+                  ),
+                  if (gateProvider.isSuccess != null)
+                    Positioned.fill(child: _buildResultOverlay(gateProvider)),
+                ],
+              ),
             ),
-          ),
-          if (gateProvider.isSuccess != null)
-            _buildResultOverlay(gateProvider),
-        ],
+            _buildHistorySection(),
+          ],
+        ),
       ),
     );
   }
@@ -179,19 +194,6 @@ class _GateScanScreenState extends State<GateScanScreen> {
           _buildModeChip(settings),
           const SizedBox(width: 6),
           _buildIconAction(
-            tooltip: _useCamera ? 'Insert kode manual' : 'Switch to camera',
-            icon: _useCamera ? Icons.keyboard_alt_outlined : Icons.camera_alt_outlined,
-            onTap: () {
-              setState(() => _useCamera = !_useCamera);
-              if (!_useCamera) {
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted) _manualFocusNode.requestFocus();
-                });
-              }
-            },
-          ),
-          const SizedBox(width: 6),
-          _buildIconAction(
             tooltip: _scanType == 'IN' ? 'Switch checkout' : 'Switch checkin',
             icon: _scanType == 'IN' ? Icons.login_rounded : Icons.logout_rounded,
             onTap: () => setState(() => _scanType = _scanType == 'IN' ? 'OUT' : 'IN'),
@@ -217,7 +219,7 @@ class _GateScanScreenState extends State<GateScanScreen> {
           borderRadius: BorderRadius.circular(8),
         ),
         child: Text(
-          settings.isOnline ? 'ONLINE' : 'OFFLINE',
+          settings.isOnline ? 'ONLINE' : 'LOCAL',
           style: const TextStyle(
             color: Colors.white,
             fontSize: 11,
@@ -287,6 +289,32 @@ class _GateScanScreenState extends State<GateScanScreen> {
           ),
           const SizedBox(width: 12),
           Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+            ),
+            child: Row(
+              children: [
+                _buildInputModeButton(
+                  label: 'CAM',
+                  icon: Icons.camera_alt_outlined,
+                  isActive: _useCamera,
+                  onTap: () => _setScanInputMode(true),
+                ),
+                const SizedBox(width: 4),
+                _buildInputModeButton(
+                  label: 'IR/MANUAL',
+                  icon: Icons.keyboard_command_key_rounded,
+                  isActive: !_useCamera,
+                  onTap: () => _setScanInputMode(false),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
               color: isOut ? const Color(0xFFD95164) : const Color(0xFF16A085),
@@ -306,6 +334,46 @@ class _GateScanScreenState extends State<GateScanScreen> {
     );
   }
 
+  Widget _buildInputModeButton({
+    required String label,
+    required IconData icon,
+    required bool isActive,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: isActive ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 15,
+              color: isActive ? const Color(0xFF12345D) : Colors.white,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: isActive ? const Color(0xFF12345D) : Colors.white,
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+                letterSpacing: .3,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildReadyToScan() {
     return Container(
       width: double.infinity,
@@ -317,11 +385,21 @@ class _GateScanScreenState extends State<GateScanScreen> {
           const Icon(Icons.qr_code_scanner_rounded, color: Color(0xFF49769B), size: 74),
           const SizedBox(height: 26),
           const Text(
-            'Ready to Scan',
+            'Infrared / Manual Ready',
             style: TextStyle(
               color: Color(0xFF122E4F),
-              fontSize: 34,
+              fontSize: 30,
               fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Mode ini untuk scanner infrared atau input manual.\nScan atau ketik kode lalu tekan enter.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Color(0xFF49769B),
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
             ),
           ),
           const SizedBox(height: 28),
@@ -538,44 +616,105 @@ class _GateScanScreenState extends State<GateScanScreen> {
   Widget _buildResultOverlay(GateProvider provider) {
     final bool success = provider.isSuccess ?? false;
     final Color bgColor = success ? AppConstants.successColor : AppConstants.errorColor;
+    final result = provider.scanResult ?? const <String, dynamic>{};
 
-    return Positioned.fill(
-      child: FadeIn(
-        duration: const Duration(milliseconds: 200),
-        child: Container(
-          color: bgColor.withValues(alpha: 0.9),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              ZoomIn(
-                child: Icon(
-                  success ? Icons.check_circle_outline_rounded : Icons.error_outline_rounded,
-                  color: Colors.white,
-                  size: 120,
+    return FadeIn(
+      duration: const Duration(milliseconds: 200),
+      child: Container(
+        color: bgColor.withValues(alpha: 0.88),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ZoomIn(
+              child: Icon(
+                success ? Icons.check_circle_outline_rounded : Icons.error_outline_rounded,
+                color: Colors.white,
+                size: 92,
+              ),
+            ),
+            const SizedBox(height: 18),
+            FadeInUp(
+              child: Text(
+                success ? 'ACCESS GRANTED' : 'ACCESS DENIED',
+                style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 1.5),
+              ),
+            ),
+            const SizedBox(height: 8),
+            FadeInUp(
+              delay: const Duration(milliseconds: 100),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 28),
+                child: Column(
+                  children: [
+                    Text(
+                      provider.message ?? '',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                    const SizedBox(height: 18),
+                    Container(
+                      width: 360,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+                      ),
+                      child: Column(
+                        children: [
+                          _buildOverlayInfoRow('Kode Tiket', result['ticket_code']?.toString() ?? '-'),
+                          _buildOverlayInfoRow('Kategori', result['category']?.toString() ?? '-'),
+                          _buildOverlayInfoRow('Email', result['email']?.toString() ?? '-'),
+                          _buildOverlayInfoRow('No. Transaksi', result['reference_no']?.toString() ?? '-'),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 24),
-              FadeInUp(
-                child: Text(
-                  success ? 'ACCESS GRANTED' : 'ACCESS DENIED',
-                  style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold, letterSpacing: 2),
-                ),
-              ),
-              const SizedBox(height: 8),
-              FadeInUp(
-                delay: const Duration(milliseconds: 100),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 40),
-                  child: Text(
-                    provider.message ?? '',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.white, fontSize: 18),
-                  ),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildOverlayInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 108,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const Text(
+            ': ',
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

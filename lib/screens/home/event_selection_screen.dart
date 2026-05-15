@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+
+import '../../core/constants.dart';
+import '../../models/event_model.dart';
+import '../../models/gate_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/event_provider.dart';
 import '../../providers/gate_provider.dart';
-import '../../core/constants.dart';
-import '../../models/event_model.dart';
 import '../gate/gate_scan_screen.dart';
 import '../settings/settings_screen.dart';
 
@@ -16,6 +19,19 @@ class EventSelectionScreen extends StatefulWidget {
 }
 
 class _EventSelectionScreenState extends State<EventSelectionScreen> {
+  final TextEditingController _codeController = TextEditingController();
+  GateModel? _selectedGate;
+  bool _isGateLoading = false;
+  bool _isCodeVerified = false;
+  String? _codeError;
+
+  GateModel get _allGateOption => GateModel(
+        id: 0,
+        name: 'All Gate',
+        allowedCategories: const [],
+        allowedCategoryIds: const [],
+      );
+
   @override
   void initState() {
     super.initState();
@@ -24,19 +40,71 @@ class _EventSelectionScreenState extends State<EventSelectionScreen> {
     });
   }
 
+  @override
+  void dispose() {
+    _codeController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadInitialData() async {
     final eventProvider = context.read<EventProvider>();
     await eventProvider.fetchEvents();
     if (!mounted || eventProvider.events.isEmpty) return;
 
-    final selectedEvent = eventProvider.selectedEvent ?? eventProvider.events.first;
-    eventProvider.selectEvent(selectedEvent);
-    await context.read<GateProvider>().fetchGates(selectedEvent.id);
+    final initialEvent = eventProvider.selectedEvent ?? eventProvider.events.first;
+    await _selectEvent(initialEvent);
   }
 
   Future<void> _selectEvent(EventModel event) async {
-    context.read<EventProvider>().selectEvent(event);
-    await context.read<GateProvider>().fetchGates(event.id);
+    final eventProvider = context.read<EventProvider>();
+    final gateProvider = context.read<GateProvider>();
+
+    eventProvider.selectEvent(event);
+    _codeController.clear();
+    _codeError = null;
+    _isCodeVerified = !event.requiresSecurityCode;
+
+    setState(() {
+      _isGateLoading = true;
+      _selectedGate = null;
+    });
+
+    await gateProvider.fetchGates(event.id);
+    if (!mounted) return;
+
+    setState(() {
+      _selectedGate = _allGateOption;
+      _isGateLoading = false;
+    });
+  }
+
+  void _verifyEventCode() {
+    final event = context.read<EventProvider>().selectedEvent;
+    if (event == null) {
+      _showSnackBar('Pilih event terlebih dahulu.');
+      return;
+    }
+
+    if (!event.requiresSecurityCode) {
+      setState(() {
+        _isCodeVerified = true;
+        _codeError = null;
+      });
+      return;
+    }
+
+    if (_codeController.text.trim() == event.securityCode) {
+      setState(() {
+        _isCodeVerified = true;
+        _codeError = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _isCodeVerified = false;
+      _codeError = 'Kode event tidak sesuai.';
+    });
   }
 
   Future<void> _openScanner() async {
@@ -44,28 +112,35 @@ class _EventSelectionScreenState extends State<EventSelectionScreen> {
     final gateProvider = context.read<GateProvider>();
 
     if (event == null) {
-      _showSnackBar('Pilih event terlebih dahulu');
+      _showSnackBar('Pilih event terlebih dahulu.');
       return;
     }
 
-    if (gateProvider.gates.isEmpty) {
-      await gateProvider.fetchGates(event.id);
-    }
-
-    if (!mounted) return;
-    if (gateProvider.gates.isEmpty) {
-      _showSnackBar('Gate belum tersedia untuk event ini');
+    if (!_isCodeVerified) {
+      _showSnackBar('Masukkan dan verifikasi kode event terlebih dahulu.');
       return;
     }
 
-    final gate = gateProvider.gates.first;
+    if (_selectedGate == null) {
+      _showSnackBar('Pilih gate terlebih dahulu.');
+      return;
+    }
+
+    if (gateProvider.gates.isEmpty && _selectedGate?.id != 0) {
+      _showSnackBar('Gate belum tersedia untuk event ini.');
+      return;
+    }
+
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => GateScanScreen(
           type: 'IN',
-          gateId: gate.id,
-          gateName: gate.name,
+          gateId: _selectedGate!.id == 0 ? null : _selectedGate!.id,
+          gateName: _selectedGate!.name,
+          eventId: event.id,
+          tenantId: event.tenantId,
+          allowedCategoryIds: _selectedGate!.allowedCategoryIds,
         ),
       ),
     );
@@ -77,17 +152,17 @@ class _EventSelectionScreenState extends State<EventSelectionScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final auth = context.read<AuthProvider>();
     final eventProvider = context.watch<EventProvider>();
     final gateProvider = context.watch<GateProvider>();
-    final auth = context.read<AuthProvider>();
     final selectedEvent = eventProvider.selectedEvent;
-    final selectedGate = gateProvider.gates.isEmpty ? null : gateProvider.gates.first;
+    final gates = [_allGateOption, ...gateProvider.gates];
 
     return Scaffold(
       backgroundColor: const Color(0xFFF3FAFF),
       appBar: AppBar(
         title: const Text(
-          'Dashboard',
+          'Pilih Event',
           style: TextStyle(color: Color(0xFF172033), fontWeight: FontWeight.w800),
         ),
         centerTitle: true,
@@ -95,6 +170,15 @@ class _EventSelectionScreenState extends State<EventSelectionScreen> {
         elevation: 0,
         actions: [
           IconButton(
+            tooltip: 'Settings',
+            icon: const Icon(Icons.settings_rounded, color: Color(0xFF172033)),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SettingsScreen()),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Logout',
             icon: const Icon(Icons.logout_rounded, color: Color(0xFF172033)),
             onPressed: () => auth.logout(),
           ),
@@ -109,58 +193,39 @@ class _EventSelectionScreenState extends State<EventSelectionScreen> {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(22, 18, 22, 28),
                     children: [
-                      _buildEventCard(selectedEvent, selectedGate?.name),
-                      const SizedBox(height: 34),
-                      const Text(
-                        'QUICK ACTIONS',
-                        style: TextStyle(
-                          color: Color(0xFF344155),
-                          fontSize: 14,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 2,
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      GridView.count(
-                        crossAxisCount: 2,
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        mainAxisSpacing: 18,
-                        crossAxisSpacing: 18,
-                        childAspectRatio: .95,
-                        children: [
-                          _buildQuickAction(
-                            title: 'Scanner',
-                            subtitle: 'Check In/Out',
-                            icon: Icons.qr_code_scanner_rounded,
-                            iconColor: const Color(0xFF1BA9E8),
-                            onTap: _openScanner,
+                      _buildHeaderCard(selectedEvent),
+                      const SizedBox(height: 24),
+                      _buildSectionTitle('1. Pilih Event'),
+                      const SizedBox(height: 12),
+                      ...eventProvider.events.map(_buildEventTile),
+                      const SizedBox(height: 24),
+                      _buildSectionTitle('2. Masukkan Kode Event'),
+                      const SizedBox(height: 12),
+                      _buildCodeSection(selectedEvent),
+                      const SizedBox(height: 24),
+                      _buildSectionTitle('3. Pilih Gate'),
+                      const SizedBox(height: 12),
+                      _buildGateSection(gates),
+                      const SizedBox(height: 28),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 58,
+                        child: ElevatedButton.icon(
+                          onPressed: _canStandby(selectedEvent) ? _openScanner : null,
+                          icon: const Icon(Icons.qr_code_scanner_rounded),
+                          label: const Text(
+                            'Standby Ready to Scan',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
                           ),
-                          _buildQuickAction(
-                            title: 'Settings',
-                            subtitle: 'Sync & Device Settings',
-                            icon: Icons.settings_rounded,
-                            iconColor: const Color(0xFF0097A7),
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF0F8E7C),
+                            foregroundColor: Colors.white,
+                            disabledBackgroundColor: const Color(0xFFB7C7D5),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(18),
                             ),
                           ),
-                          _buildQuickAction(
-                            title: 'History',
-                            subtitle: 'View Logs',
-                            icon: Icons.history_rounded,
-                            iconColor: const Color(0xFF7E57C2),
-                            onTap: _showHistorySummary,
-                          ),
-                          _buildQuickAction(
-                            title: 'Change Event',
-                            subtitle: 'Switch Gate Event',
-                            icon: Icons.swap_horiz_rounded,
-                            iconColor: const Color(0xFF2B7EBF),
-                            onTap: _showEventPicker,
-                          ),
-                        ],
+                        ),
                       ),
                     ],
                   ),
@@ -168,32 +233,23 @@ class _EventSelectionScreenState extends State<EventSelectionScreen> {
     );
   }
 
-  Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.event_busy_rounded, size: 64, color: Colors.grey),
-          const SizedBox(height: 16),
-          const Text('No active events found', style: TextStyle(color: Color(0xFF172033))),
-          TextButton(
-            onPressed: _loadInitialData,
-            child: const Text('Retry'),
-          ),
-        ],
-      ),
-    );
+  bool _canStandby(EventModel? selectedEvent) {
+    return selectedEvent != null && _selectedGate != null && _isCodeVerified && !_isGateLoading;
   }
 
-  Widget _buildEventCard(EventModel? event, String? gateName) {
+  Widget _buildHeaderCard(EventModel? event) {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
-        color: const Color(0xFF132A55),
-        borderRadius: BorderRadius.circular(18),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF12345D), Color(0xFF1F5D91)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(22),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF132A55).withValues(alpha: .22),
+            color: const Color(0xFF12345D).withValues(alpha: .18),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),
@@ -202,237 +258,318 @@ class _EventSelectionScreenState extends State<EventSelectionScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Icon(Icons.event_note_rounded, color: Color(0xFFD6E8FF), size: 22),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  event?.name ?? 'No Event Selected',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 28),
-          Container(height: 1, color: Colors.white.withValues(alpha: .18)),
-          const SizedBox(height: 26),
-          Row(
-            children: [
-              Expanded(
-                child: _buildEventMeta('GATE', gateName ?? 'Pilih Gate'),
-              ),
-              const SizedBox(width: 20),
-              Expanded(
-                child: _buildEventMeta('SCHEDULE', event?.name ?? '-'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: BoxDecoration(
-              color: const Color(0xFF6EA7D6).withValues(alpha: .28),
-              borderRadius: BorderRadius.circular(16),
+          const Text(
+            'Operational Setup',
+            style: TextStyle(
+              color: Color(0xFFD9E8F6),
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              letterSpacing: .6,
             ),
-            child: const Text(
-              'GATE',
-              style: TextStyle(
-                color: Color(0xFFE7F5FF),
-                fontSize: 11,
-                fontWeight: FontWeight.w900,
-              ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            event?.name ?? 'Pilih event untuk mulai',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
             ),
+          ),
+          const SizedBox(height: 16),
+          _buildHeaderMeta(
+            Icons.location_on_outlined,
+            event?.venue ?? 'Belum ada event terpilih',
+          ),
+          const SizedBox(height: 8),
+          _buildHeaderMeta(
+            Icons.calendar_today_outlined,
+            event == null
+                ? '-'
+                : DateFormat('dd MMM yyyy, HH:mm').format(event.eventStartDate),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildEventMeta(String label, String value) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildHeaderMeta(IconData icon, String value) {
+    return Row(
       children: [
-        Text(
-          label,
-          style: const TextStyle(
-            color: Color(0xFFCFDDF2),
-            fontSize: 12,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          value,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 16,
-            fontWeight: FontWeight.w800,
-            height: 1.25,
+        Icon(icon, color: const Color(0xFFD9E8F6), size: 16),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(
+              color: Color(0xFFF2F8FF),
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildQuickAction({
-    required String title,
-    required String subtitle,
-    required IconData icon,
-    required Color iconColor,
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: const Color(0xFFEAF7FF),
-      borderRadius: BorderRadius.circular(18),
-      elevation: 3,
-      shadowColor: Colors.black.withValues(alpha: .12),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(22),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              CircleAvatar(
-                radius: 24,
-                backgroundColor: iconColor.withValues(alpha: .10),
-                child: Icon(icon, color: iconColor, size: 28),
-              ),
-              const Spacer(),
-              Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xFF172033),
-                  fontSize: 18,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xFF7B899A),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ),
+  Widget _buildSectionTitle(String title) {
+    return Text(
+      title,
+      style: const TextStyle(
+        color: Color(0xFF24435E),
+        fontSize: 15,
+        fontWeight: FontWeight.w900,
       ),
     );
   }
 
-  void _showHistorySummary() {
-    final gateProvider = context.read<GateProvider>();
+  Widget _buildEventTile(EventModel event) {
+    final selectedEvent = context.watch<EventProvider>().selectedEvent;
+    final isSelected = selectedEvent?.id == event.id;
 
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFFF3FAFF),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-      ),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.fromLTRB(24, 22, 24, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'History Summary',
-              style: TextStyle(color: Color(0xFF172033), fontSize: 20, fontWeight: FontWeight.w900),
-            ),
-            const SizedBox(height: 18),
-            _buildSummaryRow('Total Scan', gateProvider.totalScans, AppConstants.primaryColor),
-            _buildSummaryRow('Total Valid', gateProvider.totalValidScans, AppConstants.successColor),
-            _buildSummaryRow('Total Invalid', gateProvider.totalInvalidScans, AppConstants.errorColor),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSummaryRow(String title, int value, Color color) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: isSelected ? AppConstants.primaryColor : const Color(0xFFD8E6F0),
+          width: isSelected ? 2 : 1,
+        ),
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+      child: ListTile(
+        onTap: () => _selectEvent(event),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+        leading: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: (isSelected ? AppConstants.primaryColor : const Color(0xFF7BA7C7)).withValues(alpha: .12),
+            borderRadius: BorderRadius.circular(14),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              title,
-              style: const TextStyle(color: Color(0xFF172033), fontWeight: FontWeight.w800),
+          child: Icon(
+            isSelected ? Icons.check_circle_rounded : Icons.event_note_rounded,
+            color: isSelected ? AppConstants.primaryColor : const Color(0xFF54728D),
+          ),
+        ),
+        title: Text(
+          event.name,
+          style: const TextStyle(
+            color: Color(0xFF172033),
+            fontSize: 15,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(
+            event.venue,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF6B7788),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
             ),
           ),
+        ),
+        trailing: Text(
+          DateFormat('dd MMM').format(event.eventStartDate),
+          style: const TextStyle(
+            color: Color(0xFF4C6A84),
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCodeSection(EventModel? selectedEvent) {
+    final requiresCode = selectedEvent?.requiresSecurityCode ?? false;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFD8E6F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
           Text(
-            value.toString(),
-            style: const TextStyle(color: Color(0xFF172033), fontSize: 22, fontWeight: FontWeight.w900),
+            requiresCode
+                ? 'Event ini membutuhkan kode akses sebelum scan dimulai.'
+                : 'Event ini tidak memiliki kode akses. Lanjut pilih gate.',
+            style: const TextStyle(
+              color: Color(0xFF60758A),
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _codeController,
+            enabled: selectedEvent != null && requiresCode,
+            obscureText: requiresCode,
+            decoration: InputDecoration(
+              hintText: requiresCode ? 'Masukkan kode event' : 'Kode event tidak diperlukan',
+              prefixIcon: const Icon(Icons.lock_outline_rounded),
+              errorText: _codeError,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            onChanged: (_) {
+              if (_codeError != null || _isCodeVerified) {
+                setState(() {
+                  _codeError = null;
+                  _isCodeVerified = false;
+                });
+              }
+            },
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: selectedEvent == null ? null : _verifyEventCode,
+              icon: Icon(_isCodeVerified ? Icons.verified_rounded : Icons.key_rounded),
+              label: Text(_isCodeVerified ? 'Kode Event Terverifikasi' : 'Verifikasi Kode Event'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _isCodeVerified ? const Color(0xFF0F8E7C) : AppConstants.primaryColor,
+                side: BorderSide(
+                  color: _isCodeVerified ? const Color(0xFF0F8E7C) : AppConstants.primaryColor,
+                ),
+                minimumSize: const Size(double.infinity, 48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  void _showEventPicker() {
-    final eventProvider = context.read<EventProvider>();
+  Widget _buildGateSection(List<GateModel> gates) {
+    final gateProvider = context.watch<GateProvider>();
 
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFFF3FAFF),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFD8E6F0)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF7AB8D4).withValues(alpha: .10),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
-      builder: (_) => SafeArea(
-        child: ListView.separated(
-          shrinkWrap: true,
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
-          itemCount: eventProvider.events.length,
-          separatorBuilder: (_, __) => const Divider(height: 1),
-          itemBuilder: (context, index) {
-            final event = eventProvider.events[index];
-            final isSelected = event.id == eventProvider.selectedEvent?.id;
+      child: _isGateLoading
+          ? const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Pilih gate aktif untuk mode standby scan.',
+                  style: TextStyle(
+                    color: Color(0xFF60758A),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF7FCFF),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFF9ED8E8), width: 1.4),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<GateModel>(
+                      isExpanded: true,
+                      value: _selectedGate,
+                      hint: const Text('Pilih gate'),
+                      items: gates.map((gate) {
+                        return DropdownMenuItem<GateModel>(
+                          value: gate,
+                          child: Text(
+                            gate.name,
+                            style: TextStyle(
+                              color: gate.id == 0 ? const Color(0xFF0D5C63) : const Color(0xFF172033),
+                              fontWeight: gate.id == 0 ? FontWeight.w900 : FontWeight.w700,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: gates.isEmpty
+                          ? null
+                          : (gate) {
+                              setState(() => _selectedGate = gate);
+                            },
+                      icon: const Icon(Icons.keyboard_arrow_down_rounded, color: AppConstants.primaryColor),
+                    ),
+                  ),
+                ),
+                if (gateProvider.message != null && gateProvider.gates.isEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    gateProvider.message!,
+                    style: const TextStyle(
+                      color: AppConstants.errorColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+    );
+  }
 
-            return ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                isSelected ? Icons.check_circle_rounded : Icons.event_note_rounded,
-                color: isSelected ? AppConstants.successColor : AppConstants.primaryColor,
+  Widget _buildEmptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.event_busy_rounded, size: 64, color: Colors.grey),
+            const SizedBox(height: 16),
+            const Text(
+              'Belum ada event aktif',
+              style: TextStyle(
+                color: Color(0xFF172033),
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
               ),
-              title: Text(
-                event.name,
-                style: const TextStyle(color: Color(0xFF172033), fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Tarik ke bawah untuk memuat ulang daftar event.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Color(0xFF6B7788),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
               ),
-              subtitle: Text(event.venue, style: const TextStyle(color: Color(0xFF6B7788))),
-              onTap: () async {
-                Navigator.pop(context);
-                await _selectEvent(event);
-              },
-            );
-          },
+            ),
+            const SizedBox(height: 20),
+            OutlinedButton(
+              onPressed: _loadInitialData,
+              child: const Text('Muat Ulang'),
+            ),
+          ],
         ),
       ),
     );

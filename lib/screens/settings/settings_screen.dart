@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../providers/event_provider.dart';
+import '../../providers/gate_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../core/constants.dart';
 
@@ -61,7 +63,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(width: 16),
                 Expanded(
                   child: _buildModeCard(
-                    title: 'Offline',
+                    title: 'Local',
                     icon: Icons.lan_outlined,
                     isActive: !settings.isOnline,
                     onTap: () => settings.setMode(false),
@@ -103,7 +105,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
               ),
             ] else ...[
-              const Text('Local Server IP'),
+                  const Text('Local Server IP'),
               const SizedBox(height: 8),
               TextField(
                 controller: _ipController,
@@ -116,6 +118,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ],
             const SizedBox(height: 40),
+            _buildDataSyncSection(),
+            const SizedBox(height: 28),
             Center(
               child: Column(
                 children: [
@@ -153,13 +157,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         minimumSize: const Size(double.infinity, 50),
                       ),
                       onPressed: () async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        final navigator = Navigator.of(context);
                         await settings.saveSettings();
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Settings Saved Successfully!')),
-                          );
-                          Navigator.pop(context);
-                        }
+                        if (!mounted) return;
+                        messenger.showSnackBar(
+                          const SnackBar(content: Text('Settings Saved Successfully!')),
+                        );
+                        navigator.pop();
                       },
                       child: const Text('Save Connection', style: TextStyle(fontWeight: FontWeight.bold)),
                     ),
@@ -169,6 +174,68 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildDataSyncSection() {
+    final selectedEvent = context.watch<EventProvider>().selectedEvent;
+    final gateProvider = context.watch<GateProvider>();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE2EEF6)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Gate Data Sync',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            selectedEvent == null
+                ? 'Pilih event terlebih dahulu dari dashboard.'
+                : 'Event aktif: ${selectedEvent.name}',
+            style: const TextStyle(color: Colors.grey, fontSize: 13),
+          ),
+          if (gateProvider.syncMessage != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              gateProvider.syncMessage!,
+              style: const TextStyle(
+                color: Color(0xFF0F766E),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: selectedEvent == null ? null : _downloadData,
+                  icon: const Icon(Icons.download_rounded),
+                  label: const Text('Download Data'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _uploadData,
+                  icon: const Icon(Icons.upload_rounded),
+                  label: const Text('Upload Data'),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -185,7 +252,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(vertical: 20),
         decoration: BoxDecoration(
-          color: isActive ? AppConstants.primaryColor.withOpacity(0.1) : AppConstants.cardBg,
+          color: isActive ? AppConstants.primaryColor.withValues(alpha: .10) : AppConstants.cardBg,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: isActive ? AppConstants.primaryColor : Colors.transparent,
@@ -210,15 +277,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _testConnection() async {
+    final settingsProvider = context.read<SettingsProvider>();
+    final messenger = ScaffoldMessenger.of(context);
     setState(() => _isTesting = true);
-    final success = await context.read<SettingsProvider>().checkConnection();
+    final success = await settingsProvider.checkConnection();
+    if (!mounted) return;
     setState(() => _isTesting = false);
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(success ? 'Connection Successful!' : 'Connection Failed! Check your URL/IP'),
+        backgroundColor: success ? Colors.green : Colors.red,
+      ),
+    );
+  }
+
+  Future<void> _downloadData() async {
+    final gateProvider = context.read<GateProvider>();
+    final eventProvider = context.read<EventProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    final event = eventProvider.selectedEvent;
+    if (event == null) return;
+
+    try {
+      final total = await gateProvider.downloadGateData(eventId: event.id);
+      if (!mounted) return;
+      messenger.showSnackBar(
         SnackBar(
-          content: Text(success ? 'Connection Successful!' : 'Connection Failed! Check your URL/IP'),
-          backgroundColor: success ? Colors.green : Colors.red,
+          content: Text('$total tiket berhasil diunduh untuk mode Local.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Gagal download data: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _uploadData() async {
+    final gateProvider = context.read<GateProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final total = await gateProvider.uploadPendingGateLogs();
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(total == 0 ? 'Tidak ada data untuk di-upload.' : '$total data scan berhasil di-upload.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Gagal upload data: $e'),
+          backgroundColor: Colors.red,
         ),
       );
     }

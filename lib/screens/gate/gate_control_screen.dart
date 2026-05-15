@@ -19,6 +19,13 @@ class _GateControlScreenState extends State<GateControlScreen> {
   String _scanType = 'IN'; // IN or OUT
   GateModel? _selectedGate;
 
+  GateModel get _allGateOption => GateModel(
+        id: 0,
+        name: 'All Gate',
+        allowedCategories: const [],
+        allowedCategoryIds: const [],
+      );
+
   @override
   void initState() {
     super.initState();
@@ -33,11 +40,12 @@ class _GateControlScreenState extends State<GateControlScreen> {
     await context.read<GateProvider>().fetchGates(event.id);
     if (mounted) {
       final gates = context.read<GateProvider>().gates;
-      if (gates.isNotEmpty) {
-        setState(() {
-          _selectedGate = gates.first;
-        });
-      }
+      setState(() {
+        _selectedGate = _allGateOption;
+        if (gates.isNotEmpty) {
+          _selectedGate = _allGateOption;
+        }
+      });
     }
   }
 
@@ -91,8 +99,14 @@ class _GateControlScreenState extends State<GateControlScreen> {
                 _buildDropdown<GateModel>(
                   label: 'Gate',
                   value: _selectedGate,
-                  items: gateProvider.gates,
-                  displayBuilder: (gate) => Text(gate.name),
+                  items: [_allGateOption, ...gateProvider.gates],
+                  displayBuilder: (gate) => Text(
+                    gate.name,
+                    style: TextStyle(
+                      fontWeight: gate.id == 0 ? FontWeight.w900 : FontWeight.w700,
+                      color: gate.id == 0 ? const Color(0xFF0D5C63) : const Color(0xFF172033),
+                    ),
+                  ),
                   onChanged: (v) => setState(() => _selectedGate = v),
                   icon: Icons.door_sliding_outlined,
                 ),
@@ -135,8 +149,11 @@ class _GateControlScreenState extends State<GateControlScreen> {
                         MaterialPageRoute(
                           builder: (_) => GateScanScreen(
                             type: _scanType,
-                            gateId: _selectedGate!.id,
+                            gateId: _selectedGate!.id == 0 ? null : _selectedGate!.id,
                             gateName: _selectedGate!.name,
+                            eventId: event!.id,
+                            tenantId: event.tenantId,
+                            allowedCategoryIds: _selectedGate!.allowedCategoryIds,
                           ),
                         ),
                       );
@@ -145,7 +162,7 @@ class _GateControlScreenState extends State<GateControlScreen> {
                       backgroundColor: AppConstants.primaryColor,
                       foregroundColor: Colors.white,
                       elevation: 4,
-                      shadowColor: AppConstants.primaryColor.withOpacity(0.5),
+                      shadowColor: AppConstants.primaryColor.withValues(alpha: .50),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),
                       ),
@@ -181,7 +198,7 @@ class _GateControlScreenState extends State<GateControlScreen> {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: AppConstants.primaryColor.withOpacity(0.3),
+            color: AppConstants.primaryColor.withValues(alpha: .30),
             blurRadius: 15,
             offset: const Offset(0, 8),
           ),
@@ -196,7 +213,7 @@ class _GateControlScreenState extends State<GateControlScreen> {
               const SizedBox(width: 8),
               Text(
                 "Event Terpilih",
-                style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12, fontWeight: FontWeight.w500),
+                style: TextStyle(color: Colors.white.withValues(alpha: .80), fontSize: 12, fontWeight: FontWeight.w500),
               ),
             ],
           ),
@@ -248,13 +265,13 @@ class _GateControlScreenState extends State<GateControlScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border.all(color: Colors.grey[300]!),
+        border: Border.all(color: const Color(0xFF9ED8E8), width: 1.4),
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+            color: const Color(0xFF45A8C9).withValues(alpha: .12),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
@@ -299,7 +316,7 @@ class _GateControlScreenState extends State<GateControlScreen> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(vertical: 16),
         decoration: BoxDecoration(
-          color: isActive ? AppConstants.primaryColor.withOpacity(0.05) : Colors.white,
+          color: isActive ? AppConstants.primaryColor.withValues(alpha: .05) : Colors.white,
           border: Border.all(
             color: isActive ? AppConstants.primaryColor : Colors.grey[200]!,
             width: isActive ? 2 : 1,
