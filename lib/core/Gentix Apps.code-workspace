@@ -1,0 +1,15 @@
+{
+	"folders": [
+		{
+			"path": "../.."
+		},
+		{
+			"path": "../../../gentix-apps"
+		}
+	],
+	"settings": {
+		"chat.tools.terminal.autoApprove": {
+			"flutter": true
+		}
+	}
+}
