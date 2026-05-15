@@ -5,14 +5,17 @@ import 'package:provider/provider.dart';
 import '../../core/constants.dart';
 import '../../models/event_model.dart';
 import '../../models/gate_model.dart';
-import '../../providers/auth_provider.dart';
 import '../../providers/event_provider.dart';
 import '../../providers/gate_provider.dart';
 import '../gate/gate_scan_screen.dart';
-import '../settings/settings_screen.dart';
 
 class EventSelectionScreen extends StatefulWidget {
-  const EventSelectionScreen({super.key});
+  final bool launchScannerOnApply;
+
+  const EventSelectionScreen({
+    super.key,
+    this.launchScannerOnApply = false,
+  });
 
   @override
   State<EventSelectionScreen> createState() => _EventSelectionScreenState();
@@ -58,6 +61,11 @@ class _EventSelectionScreenState extends State<EventSelectionScreen> {
   Future<void> _selectEvent(EventModel event) async {
     final eventProvider = context.read<EventProvider>();
     final gateProvider = context.read<GateProvider>();
+    final previousEventId = eventProvider.selectedEvent?.id;
+
+    if (previousEventId != null && previousEventId != event.id) {
+      gateProvider.clearGateSelection();
+    }
 
     eventProvider.selectEvent(event);
     _codeController.clear();
@@ -72,8 +80,9 @@ class _EventSelectionScreenState extends State<EventSelectionScreen> {
     await gateProvider.fetchGates(event.id);
     if (!mounted) return;
 
+    final providerGate = gateProvider.selectedGate;
     setState(() {
-      _selectedGate = _allGateOption;
+      _selectedGate = providerGate ?? (gateProvider.gates.isNotEmpty ? gateProvider.gates.first : _allGateOption);
       _isGateLoading = false;
     });
   }
@@ -107,7 +116,7 @@ class _EventSelectionScreenState extends State<EventSelectionScreen> {
     });
   }
 
-  Future<void> _openScanner() async {
+  Future<void> _applySelection() async {
     final event = context.read<EventProvider>().selectedEvent;
     final gateProvider = context.read<GateProvider>();
 
@@ -126,12 +135,14 @@ class _EventSelectionScreenState extends State<EventSelectionScreen> {
       return;
     }
 
-    if (gateProvider.gates.isEmpty && _selectedGate?.id != 0) {
-      _showSnackBar('Gate belum tersedia untuk event ini.');
+    gateProvider.selectGate(_selectedGate);
+
+    if (!widget.launchScannerOnApply) {
+      if (mounted) Navigator.pop(context, true);
       return;
     }
 
-    Navigator.push(
+    await Navigator.pushReplacement(
       context,
       MaterialPageRoute(
         builder: (_) => GateScanScreen(
@@ -152,7 +163,6 @@ class _EventSelectionScreenState extends State<EventSelectionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.read<AuthProvider>();
     final eventProvider = context.watch<EventProvider>();
     final gateProvider = context.watch<GateProvider>();
     final selectedEvent = eventProvider.selectedEvent;
@@ -161,28 +171,13 @@ class _EventSelectionScreenState extends State<EventSelectionScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF3FAFF),
       appBar: AppBar(
-        title: const Text(
-          'Pilih Event',
-          style: TextStyle(color: Color(0xFF172033), fontWeight: FontWeight.w800),
+        title: Text(
+          widget.launchScannerOnApply ? 'Setup Scan Gate' : 'Ubah Event & Gate',
+          style: const TextStyle(color: Color(0xFF172033), fontWeight: FontWeight.w800),
         ),
         centerTitle: true,
         backgroundColor: const Color(0xFFF3FAFF),
         elevation: 0,
-        actions: [
-          IconButton(
-            tooltip: 'Settings',
-            icon: const Icon(Icons.settings_rounded, color: Color(0xFF172033)),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const SettingsScreen()),
-            ),
-          ),
-          IconButton(
-            tooltip: 'Logout',
-            icon: const Icon(Icons.logout_rounded, color: Color(0xFF172033)),
-            onPressed: () => auth.logout(),
-          ),
-        ],
       ),
       body: eventProvider.isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -211,11 +206,17 @@ class _EventSelectionScreenState extends State<EventSelectionScreen> {
                         width: double.infinity,
                         height: 58,
                         child: ElevatedButton.icon(
-                          onPressed: _canStandby(selectedEvent) ? _openScanner : null,
-                          icon: const Icon(Icons.qr_code_scanner_rounded),
-                          label: const Text(
-                            'Standby Ready to Scan',
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                          onPressed: _canApply(selectedEvent) ? _applySelection : null,
+                          icon: Icon(
+                            widget.launchScannerOnApply
+                                ? Icons.qr_code_scanner_rounded
+                                : Icons.check_circle_outline_rounded,
+                          ),
+                          label: Text(
+                            widget.launchScannerOnApply
+                                ? 'Standby Ready to Scan'
+                                : 'Terapkan Event & Gate',
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
                           ),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF0F8E7C),
@@ -233,7 +234,7 @@ class _EventSelectionScreenState extends State<EventSelectionScreen> {
     );
   }
 
-  bool _canStandby(EventModel? selectedEvent) {
+  bool _canApply(EventModel? selectedEvent) {
     return selectedEvent != null && _selectedGate != null && _isCodeVerified && !_isGateLoading;
   }
 

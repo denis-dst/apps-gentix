@@ -295,11 +295,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _downloadData() async {
     final gateProvider = context.read<GateProvider>();
     final eventProvider = context.read<EventProvider>();
+    final settingsProvider = context.read<SettingsProvider>();
     final messenger = ScaffoldMessenger.of(context);
     final event = eventProvider.selectedEvent;
     if (event == null) return;
 
     try {
+      final isConnected = settingsProvider.isConnected || await settingsProvider.checkConnection();
+      if (!isConnected) {
+        if (!mounted) return;
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('Server belum terhubung. Cek koneksi lalu coba lagi.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
       final total = await gateProvider.downloadGateData(eventId: event.id);
       if (!mounted) return;
       messenger.showSnackBar(

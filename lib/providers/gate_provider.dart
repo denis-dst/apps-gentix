@@ -24,6 +24,7 @@ class GateProvider extends ChangeNotifier {
   bool? _isSuccess;
   Map<String, dynamic>? _scanResult;
   List<GateModel> _gates = [];
+  GateModel? _selectedGate;
   int _totalScans = 0;
   int _totalValidScans = 0;
   int _totalInvalidScans = 0;
@@ -34,6 +35,7 @@ class GateProvider extends ChangeNotifier {
   bool? get isSuccess => _isSuccess;
   Map<String, dynamic>? get scanResult => _scanResult;
   List<GateModel> get gates => _gates;
+  GateModel? get selectedGate => _selectedGate;
   int get totalScans => _totalScans;
   int get totalValidScans => _totalValidScans;
   int get totalInvalidScans => _totalInvalidScans;
@@ -49,6 +51,16 @@ class GateProvider extends ChangeNotifier {
       final response = await _apiClient.dio.get('/gate/list', queryParameters: {'event_id': eventId});
       final List data = response.data['data'] ?? [];
       _gates = data.map((json) => GateModel.fromJson(json)).toList();
+
+      if (_selectedGate == null) {
+        _selectedGate = _gates.isNotEmpty ? _gates.first : null;
+      } else if (_selectedGate!.id != 0) {
+        final selectedGateId = _selectedGate!.id;
+        final matchingGates = _gates.where((gate) => gate.id == selectedGateId).toList();
+        _selectedGate = matchingGates.isNotEmpty
+            ? matchingGates.first
+            : (_gates.isNotEmpty ? _gates.first : null);
+      }
     } on DioException catch (e) {
       _message = e.response?.data['message'] ?? 'Failed to load gates';
       _gates = [];
@@ -59,6 +71,16 @@ class GateProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  void selectGate(GateModel? gate) {
+    _selectedGate = gate;
+    notifyListeners();
+  }
+
+  void clearGateSelection() {
+    _selectedGate = null;
+    notifyListeners();
   }
 
   Future<void> scanWristband({
@@ -159,42 +181,63 @@ class GateProvider extends ChangeNotifier {
 
   Future<int> downloadGateData({required int eventId}) async {
     _apiClient.updateBaseUrl(settings.baseUrl);
-    final response = await _apiClient.dio.get('/gate/download-data', queryParameters: {
-      'event_id': eventId,
-    });
+    final previousConnectTimeout = _apiClient.dio.options.connectTimeout;
+    final previousReceiveTimeout = _apiClient.dio.options.receiveTimeout;
+    final previousSendTimeout = _apiClient.dio.options.sendTimeout;
 
-    final List tickets = response.data['tickets'] ?? [];
-    final List gates = response.data['gates'] ?? [];
+    try {
+      _apiClient.dio.options.connectTimeout = const Duration(seconds: 45);
+      _apiClient.dio.options.receiveTimeout = const Duration(seconds: 90);
+      _apiClient.dio.options.sendTimeout = const Duration(seconds: 45);
 
-    await _localGateDataService.replaceEventData(
-      eventId: eventId,
-      tickets: tickets.map((ticket) {
-        final map = Map<String, dynamic>.from(ticket as Map);
-        return {
-          'ticket_id': map['ticket_id'],
-          'event_id': map['event_id'],
-          'tenant_id': map['tenant_id'],
-          'ticket_category_id': map['ticket_category_id'],
-          'ticket_code': map['ticket_code'],
-          'wristband_qr': map['wristband_qr'],
-          'category_name': map['category_name'],
-          'customer_email': map['customer_email'],
-          'reference_no': map['reference_no'],
-        };
-      }).toList(),
-      gates: gates.map((gate) {
-        final map = Map<String, dynamic>.from(gate as Map);
-        final List allowedIds = map['allowed_category_ids'] ?? const [];
-        return {
-          'gate_id': map['gate_id'],
-          'event_id': map['event_id'],
-          'gate_name': map['gate_name'],
-          'allowed_category_ids': allowedIds.join(','),
-        };
-      }).toList(),
-    );
+      final response = await _apiClient.dio.get('/gate/download-data', queryParameters: {
+        'event_id': eventId,
+      });
 
-    return _localGateDataService.getLocalTicketCount(eventId);
+      final List tickets = response.data['tickets'] ?? [];
+      final List gates = response.data['gates'] ?? [];
+
+      await _localGateDataService.replaceEventData(
+        eventId: eventId,
+        tickets: tickets.map((ticket) {
+          final map = Map<String, dynamic>.from(ticket as Map);
+          return {
+            'ticket_id': map['ticket_id'],
+            'event_id': map['event_id'],
+            'tenant_id': map['tenant_id'],
+            'ticket_category_id': map['ticket_category_id'],
+            'ticket_code': map['ticket_code'],
+            'wristband_qr': map['wristband_qr'],
+            'category_name': map['category_name'],
+            'customer_email': map['customer_email'],
+            'reference_no': map['reference_no'],
+          };
+        }).toList(),
+        gates: gates.map((gate) {
+          final map = Map<String, dynamic>.from(gate as Map);
+          final List allowedIds = map['allowed_category_ids'] ?? const [];
+          return {
+            'gate_id': map['gate_id'],
+            'event_id': map['event_id'],
+            'gate_name': map['gate_name'],
+            'allowed_category_ids': allowedIds.join(','),
+          };
+        }).toList(),
+      );
+
+      return _localGateDataService.getLocalTicketCount(eventId);
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.sendTimeout) {
+        throw Exception('Koneksi ke server terlalu lama. Pastikan server aktif lalu coba lagi.');
+      }
+      throw Exception(e.response?.data['message'] ?? 'Gagal mengunduh data gate.');
+    } finally {
+      _apiClient.dio.options.connectTimeout = previousConnectTimeout;
+      _apiClient.dio.options.receiveTimeout = previousReceiveTimeout;
+      _apiClient.dio.options.sendTimeout = previousSendTimeout;
+    }
   }
 
   Future<int> uploadPendingGateLogs() async {

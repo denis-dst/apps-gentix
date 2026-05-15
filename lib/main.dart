@@ -7,7 +7,7 @@ import 'providers/event_provider.dart';
 import 'providers/gate_provider.dart';
 import 'providers/pos_provider.dart';
 import 'screens/auth/login_screen.dart';
-import 'screens/home/event_selection_screen.dart';
+import 'screens/home/dashboard_screen.dart';
 
 import 'providers/settings_provider.dart';
 
@@ -48,7 +48,6 @@ class GenTixApp extends StatelessWidget {
             brightness: Brightness.dark,
             primary: AppConstants.primaryColor,
             secondary: AppConstants.secondaryColor,
-            background: AppConstants.darkBg,
             surface: AppConstants.cardBg,
           ),
           scaffoldBackgroundColor: AppConstants.darkBg,
@@ -103,7 +102,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     if (auth.isAuthenticated) {
-      return const EventSelectionScreen();
+      return const DashboardScreen();
     }
     return const LoginScreen();
   }
