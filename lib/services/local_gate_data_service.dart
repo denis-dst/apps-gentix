@@ -20,7 +20,7 @@ class LocalGateDataService {
 
     return openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE local_gate_tickets (
@@ -32,7 +32,10 @@ class LocalGateDataService {
             ticket_code TEXT NOT NULL,
             wristband_qr TEXT,
             category_name TEXT,
+            customer_name TEXT,
             customer_email TEXT,
+            custom_question_label TEXT,
+            custom_question_answer TEXT,
             reference_no TEXT
           )
         ''');
@@ -62,7 +65,24 @@ class LocalGateDataService {
           )
         ''');
       },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await _addColumnIfMissing(db, 'local_gate_tickets', 'customer_name TEXT');
+          await _addColumnIfMissing(db, 'local_gate_tickets', 'custom_question_label TEXT');
+          await _addColumnIfMissing(db, 'local_gate_tickets', 'custom_question_answer TEXT');
+        }
+      },
     );
+  }
+
+  Future<void> _addColumnIfMissing(Database db, String table, String columnDefinition) async {
+    final columnName = columnDefinition.split(' ').first;
+    final columns = await db.rawQuery('PRAGMA table_info($table)');
+    final exists = columns.any((column) => column['name'] == columnName);
+
+    if (!exists) {
+      await db.execute('ALTER TABLE $table ADD COLUMN $columnDefinition');
+    }
   }
 
   Future<void> replaceEventData({

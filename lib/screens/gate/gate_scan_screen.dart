@@ -81,14 +81,16 @@ class _GateScanScreenState extends State<GateScanScreen> {
     );
     _manualController.clear();
 
-    // Wait a bit to show result then reset
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) {
-        context.read<GateProvider>().clearStatus();
-        setState(() => _isProcessing = false);
-        if (!_useCamera) _manualFocusNode.requestFocus();
-      }
-    });
+    // Wait a bit to show result then reset (only if scan is not successful)
+    if (provider.isSuccess != true) {
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          context.read<GateProvider>().clearStatus();
+          setState(() => _isProcessing = false);
+          if (!_useCamera) _manualFocusNode.requestFocus();
+        }
+      });
+    }
   }
 
   void _setScanInputMode(bool useCamera) {
@@ -617,6 +619,12 @@ class _GateScanScreenState extends State<GateScanScreen> {
     final bool success = provider.isSuccess ?? false;
     final Color bgColor = success ? AppConstants.successColor : AppConstants.errorColor;
     final result = provider.scanResult ?? const <String, dynamic>{};
+    final customQuestionLabel = result['custom_question_label']?.toString() ?? '-';
+    final customQuestionAnswer = result['custom_question_answer']?.toString() ?? '-';
+    final hasCustomQuestion = customQuestionLabel.trim().isNotEmpty &&
+        customQuestionLabel != '-' &&
+        customQuestionAnswer.trim().isNotEmpty &&
+        customQuestionAnswer != '-';
 
     return FadeIn(
       duration: const Duration(milliseconds: 200),
@@ -663,10 +671,41 @@ class _GateScanScreenState extends State<GateScanScreen> {
                       child: Column(
                         children: [
                           _buildOverlayInfoRow('Kode Tiket', result['ticket_code']?.toString() ?? '-'),
+                          _buildOverlayInfoRow('Nama Customer', result['visitor']?.toString() ?? result['customer_name']?.toString() ?? '-'),
+                          if (hasCustomQuestion)
+                            _buildOverlayInfoRow(customQuestionLabel, customQuestionAnswer),
                           _buildOverlayInfoRow('Kategori', result['category']?.toString() ?? '-'),
                           _buildOverlayInfoRow('Email', result['email']?.toString() ?? '-'),
                           _buildOverlayInfoRow('No. Transaksi', result['reference_no']?.toString() ?? '-'),
                         ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: bgColor,
+                        minimumSize: const Size(200, 50),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(28),
+                        ),
+                        elevation: 4,
+                        shadowColor: Colors.black.withValues(alpha: 0.25),
+                      ),
+                      onPressed: () {
+                        context.read<GateProvider>().clearStatus();
+                        setState(() {
+                          _isProcessing = false;
+                        });
+                        if (!_useCamera) _manualFocusNode.requestFocus();
+                      },
+                      child: const Text(
+                        'OK',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.0,
+                        ),
                       ),
                     ),
                   ],

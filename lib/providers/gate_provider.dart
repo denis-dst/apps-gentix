@@ -209,7 +209,10 @@ class GateProvider extends ChangeNotifier {
             'ticket_code': map['ticket_code'],
             'wristband_qr': map['wristband_qr'],
             'category_name': map['category_name'],
+            'customer_name': map['customer_name'],
             'customer_email': map['customer_email'],
+            'custom_question_label': map['custom_question_label'],
+            'custom_question_answer': map['custom_question_answer'],
             'reference_no': map['reference_no'],
           };
         }).toList(),
@@ -345,8 +348,11 @@ class GateProvider extends ChangeNotifier {
     return {
       'message': 'Access Granted: $type',
       'ticket_code': ticket['ticket_code'] ?? scannedCode,
+      'visitor': ticket['customer_name'] ?? '-',
       'category': ticket['category_name'] ?? '-',
       'email': ticket['customer_email'] ?? '-',
+      'custom_question_label': ticket['custom_question_label'] ?? '-',
+      'custom_question_answer': ticket['custom_question_answer'] ?? '-',
       'reference_no': ticket['reference_no'] ?? '-',
     };
   }
