@@ -143,6 +143,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
             const SizedBox(height: 28),
 
+            // ── Pengaturan Gate ──
+            _sectionLabel('Pengaturan Gate'),
+            const SizedBox(height: 4),
+            Text(
+              'Cara menutup hasil scan sebelum kembali ke mode siap scan.',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: .45),
+                fontSize: 11,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildModeCard(
+                    title: 'Tombol OK',
+                    subtitle: 'Konfirmasi manual',
+                    icon: Icons.touch_app_rounded,
+                    isActive: !settings.gateAutoTimer,
+                    onTap: () => settings.setGateAutoTimer(false),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildModeCard(
+                    title: 'Timer Otomatis',
+                    subtitle: 'Kembali 3 detik',
+                    icon: Icons.timer_rounded,
+                    isActive: settings.gateAutoTimer,
+                    onTap: () => settings.setGateAutoTimer(true),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 28),
+
             // ── Data Sync Section (hanya Local) ──
             if (!settings.isOnline) ...[
               _buildDataSyncCard(),

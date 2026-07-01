@@ -38,6 +38,9 @@ class _GateScanScreenState extends State<GateScanScreen> {
   bool _useCamera = true;
   late String _scanType;
   final List<_ScanHistoryItem> _scanHistory = [];
+  // Bertambah setiap ada hasil scan baru; dipakai agar timer auto-reset dari
+  // scan lama tidak mereset hasil scan yang lebih baru.
+  int _resultToken = 0;
 
   @override
   void initState() {
@@ -81,16 +84,25 @@ class _GateScanScreenState extends State<GateScanScreen> {
     );
     _manualController.clear();
 
-    // Wait a bit to show result then reset (only if scan is not successful)
-    if (provider.isSuccess != true) {
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) {
-          context.read<GateProvider>().clearStatus();
-          setState(() => _isProcessing = false);
-          if (!_useCamera) _manualFocusNode.requestFocus();
-        }
-      });
+    final token = ++_resultToken;
+    final autoTimer = context.read<SettingsProvider>().gateAutoTimer;
+
+    if (autoTimer) {
+      // Mode timer otomatis: apapun hasilnya, kembali ke ready-to-scan setelah 3 detik.
+      Future.delayed(const Duration(seconds: 3), () => _resetScan(token));
+    } else if (provider.isSuccess != true) {
+      // Mode tombol OK: hasil gagal tetap otomatis reset agar antrian lancar,
+      // sedangkan hasil sukses menunggu operator menekan OK.
+      Future.delayed(const Duration(seconds: 2), () => _resetScan(token));
     }
+  }
+
+  void _resetScan(int token) {
+    // Abaikan bila sudah ada hasil scan yang lebih baru atau sudah di-reset manual.
+    if (!mounted || token != _resultToken) return;
+    context.read<GateProvider>().clearStatus();
+    setState(() => _isProcessing = false);
+    if (!_useCamera) _manualFocusNode.requestFocus();
   }
 
   void _setScanInputMode(bool useCamera) {
@@ -618,6 +630,7 @@ class _GateScanScreenState extends State<GateScanScreen> {
   Widget _buildResultOverlay(GateProvider provider) {
     final bool success = provider.isSuccess ?? false;
     final Color bgColor = success ? AppConstants.successColor : AppConstants.errorColor;
+    final bool autoTimer = context.watch<SettingsProvider>().gateAutoTimer;
     final result = provider.scanResult ?? const <String, dynamic>{};
     final customQuestionLabel = result['custom_question_label']?.toString() ?? '-';
     final customQuestionAnswer = result['custom_question_answer']?.toString() ?? '-';
@@ -629,90 +642,142 @@ class _GateScanScreenState extends State<GateScanScreen> {
     return FadeIn(
       duration: const Duration(milliseconds: 200),
       child: Container(
-        color: bgColor.withValues(alpha: 0.88),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            ZoomIn(
-              child: Icon(
-                success ? Icons.check_circle_outline_rounded : Icons.error_outline_rounded,
-                color: Colors.white,
-                size: 92,
-              ),
-            ),
-            const SizedBox(height: 18),
-            FadeInUp(
-              child: Text(
-                success ? 'ACCESS GRANTED' : 'ACCESS DENIED',
-                style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 1.5),
-              ),
-            ),
-            const SizedBox(height: 8),
-            FadeInUp(
-              delay: const Duration(milliseconds: 100),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 28),
-                child: Column(
-                  children: [
-                    Text(
-                      provider.message ?? '',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white, fontSize: 16),
-                    ),
-                    const SizedBox(height: 18),
-                    Container(
-                      width: 360,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.14),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+        color: bgColor.withValues(alpha: 0.92),
+        child: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // Skala mengikuti ukuran layar agar area hijau/putih tidak melebar
+              // di layar besar dan tidak meluber (menutup tombol OK) di layar kecil.
+              final bool compact = constraints.maxHeight < 560;
+              final double iconSize = compact ? 62 : 84;
+              final double cardWidth =
+                  constraints.maxWidth - 40 > 380 ? 380 : constraints.maxWidth - 40;
+
+              return Column(
+                children: [
+                  // Konten hasil scan — scrollable agar tidak pernah menutupi tombol OK.
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: compact ? 12 : 20,
                       ),
-                      child: Column(
-                        children: [
-                          _buildOverlayInfoRow('Kode Tiket', result['ticket_code']?.toString() ?? '-'),
-                          _buildOverlayInfoRow('Nama Customer', result['visitor']?.toString() ?? result['customer_name']?.toString() ?? '-'),
-                          if (hasCustomQuestion)
-                            _buildOverlayInfoRow(customQuestionLabel, customQuestionAnswer),
-                          _buildOverlayInfoRow('Kategori', result['category']?.toString() ?? '-'),
-                          _buildOverlayInfoRow('Email', result['email']?.toString() ?? '-'),
-                          _buildOverlayInfoRow('No. Transaksi', result['reference_no']?.toString() ?? '-'),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: bgColor,
-                        minimumSize: const Size(200, 50),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(28),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(minHeight: constraints.maxHeight - 100),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            ZoomIn(
+                              child: Icon(
+                                success
+                                    ? Icons.check_circle_outline_rounded
+                                    : Icons.error_outline_rounded,
+                                color: Colors.white,
+                                size: iconSize,
+                              ),
+                            ),
+                            SizedBox(height: compact ? 10 : 18),
+                            FadeInUp(
+                              child: Text(
+                                success ? 'ACCESS GRANTED' : 'ACCESS DENIED',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: compact ? 20 : 24,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 1.5,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            FadeInUp(
+                              delay: const Duration(milliseconds: 100),
+                              child: Column(
+                                children: [
+                                  Text(
+                                    provider.message ?? '',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(color: Colors.white, fontSize: 15),
+                                  ),
+                                  SizedBox(height: compact ? 12 : 18),
+                                  Container(
+                                    width: cardWidth,
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(alpha: 0.14),
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(
+                                        color: Colors.white.withValues(alpha: 0.18),
+                                      ),
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        _buildOverlayInfoRow('Kode Tiket',
+                                            result['ticket_code']?.toString() ?? '-'),
+                                        _buildOverlayInfoRow(
+                                            'Nama Customer',
+                                            result['visitor']?.toString() ??
+                                                result['customer_name']?.toString() ??
+                                                '-'),
+                                        if (hasCustomQuestion)
+                                          _buildOverlayInfoRow(
+                                              customQuestionLabel, customQuestionAnswer),
+                                        _buildOverlayInfoRow('Kategori',
+                                            result['category']?.toString() ?? '-'),
+                                        _buildOverlayInfoRow(
+                                            'Email', result['email']?.toString() ?? '-'),
+                                        _buildOverlayInfoRow('No. Transaksi',
+                                            result['reference_no']?.toString() ?? '-'),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
-                        elevation: 4,
-                        shadowColor: Colors.black.withValues(alpha: 0.25),
                       ),
-                      onPressed: () {
-                        context.read<GateProvider>().clearStatus();
-                        setState(() {
-                          _isProcessing = false;
-                        });
-                        if (!_useCamera) _manualFocusNode.requestFocus();
-                      },
-                      child: const Text(
-                        'OK',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.0,
+                    ),
+                  ),
+
+                  // Tombol OK selalu menempel di bawah overlay, tidak pernah tertutup.
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: bgColor,
+                          minimumSize: const Size(0, 50),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(28),
+                          ),
+                          elevation: 4,
+                          shadowColor: Colors.black.withValues(alpha: 0.25),
+                        ),
+                        onPressed: () {
+                          // Batalkan timer auto-reset yang tertunda lalu reset segera.
+                          _resultToken++;
+                          context.read<GateProvider>().clearStatus();
+                          setState(() => _isProcessing = false);
+                          if (!_useCamera) _manualFocusNode.requestFocus();
+                        },
+                        child: Text(
+                          autoTimer ? 'OK (otomatis 3 detik)' : 'OK',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1.0,
+                          ),
                         ),
                       ),
                     ),
-                  ],
-                ),
-              ),
-            ),
-          ],
+                  ),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
