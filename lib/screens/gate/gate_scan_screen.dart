@@ -115,14 +115,14 @@ class _GateScanScreenState extends State<GateScanScreen> {
     } else {
       final token = ++_resultToken;
       final autoTimer = context.read<SettingsProvider>().gateAutoTimer;
+      final bool failed = provider.isSuccess != true;
 
-      if (autoTimer) {
-        // Mode timer otomatis: apapun hasilnya, kembali ke ready-to-scan setelah 3 detik.
+      if (failed) {
+        // Mode gagal: tampilkan selama 5 detik agar operator bisa membaca alasan ditolak
+        Future.delayed(const Duration(seconds: 5), () => _resetScan(token));
+      } else if (autoTimer) {
+        // Mode sukses + timer otomatis: kembali ke ready-to-scan setelah 3 detik.
         Future.delayed(const Duration(seconds: 3), () => _resetScan(token));
-      } else if (provider.isSuccess != true) {
-        // Mode tombol OK: hasil gagal tetap otomatis reset agar antrian lancar,
-        // sedangkan hasil sukses menunggu operator menekan OK.
-        Future.delayed(const Duration(seconds: 2), () => _resetScan(token));
       }
     }
   }
@@ -402,6 +402,12 @@ class _GateScanScreenState extends State<GateScanScreen> {
                         final bool isCheckedIn = a['is_checked_in'] as bool? ?? false;
                         final String? checkedInAt = a['checked_in_at']?.toString();
                         final String? checkedInBy = a['checked_in_by']?.toString();
+                        final String? customLabel = a['custom_question_label']?.toString();
+                        final String? customAnswer = a['custom_question_answer']?.toString();
+                        final bool hasCustom = customLabel != null && 
+                            customLabel != '-' && 
+                            customAnswer != null && 
+                            customAnswer != '-';
 
                         final bool isSelected = _selectedTicketIds.contains(ticketId);
 
@@ -470,6 +476,17 @@ class _GateScanScreenState extends State<GateScanScreen> {
                                           fontWeight: FontWeight.w600,
                                         ),
                                       ),
+                                      if (hasCustom) ...[
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '$customLabel: $customAnswer',
+                                          style: const TextStyle(
+                                            color: Color(0xFFF39C12),
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
                                       if (isCheckedIn) ...[
                                         const SizedBox(height: 4),
                                         Text(
