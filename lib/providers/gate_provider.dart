@@ -172,6 +172,72 @@ class GateProvider extends ChangeNotifier {
     }
   }
 
+  Future<bool> bulkCheckin({
+    required List<int> ticketIds,
+    required String type,
+    required int? gateId,
+    required String gateName,
+    required String deviceId,
+  }) async {
+    _isLoading = true;
+    _message = null;
+    _isSuccess = null;
+    notifyListeners();
+
+    try {
+      _apiClient.updateBaseUrl(settings.baseUrl);
+      final response = await _apiClient.dio.post('/gate/bulk-checkin', data: {
+        'ticket_ids': ticketIds,
+        'type': type,
+        'gate_id': gateId,
+        'gate_name': gateName,
+        'device_id': deviceId,
+      });
+
+      _isSuccess = true;
+      _message = response.data['message']?.toString() ?? 'Berhasil memproses check-in masal';
+      _scanResult = response.data;
+      _totalScans += ticketIds.length;
+      _totalValidScans += ticketIds.length;
+
+      // Sound feedback
+      await _audioPlayer.play(AssetSource('sounds/success.mp3'));
+
+      // Haptic feedback
+      if (await Vibration.hasVibrator()) {
+        Vibration.vibrate(duration: 100);
+      }
+      return true;
+    } on DioException catch (e) {
+      _isSuccess = false;
+      _message = e.response?.data['message'] ?? 'Gagal memproses check-in masal';
+      _scanResult = e.response?.data is Map<String, dynamic>
+          ? Map<String, dynamic>.from(e.response?.data)
+          : null;
+      _totalScans += ticketIds.length;
+      _totalInvalidScans += ticketIds.length;
+      await _audioPlayer.play(AssetSource('sounds/invalid.mp3'));
+      if (await Vibration.hasVibrator()) {
+        Vibration.vibrate(pattern: [0, 200, 100, 200]);
+      }
+      return false;
+    } catch (e) {
+      _isSuccess = false;
+      _message = e.toString().replaceFirst('Exception: ', '');
+      _scanResult = null;
+      _totalScans += ticketIds.length;
+      _totalInvalidScans += ticketIds.length;
+      await _audioPlayer.play(AssetSource('sounds/invalid.mp3'));
+      if (await Vibration.hasVibrator()) {
+        Vibration.vibrate(pattern: [0, 200, 100, 200]);
+      }
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
   void clearStatus() {
     _isSuccess = null;
     _message = null;

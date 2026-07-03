@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:ui';
 import 'package:intl/intl.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
@@ -41,6 +42,7 @@ class _GateScanScreenState extends State<GateScanScreen> {
   // Bertambah setiap ada hasil scan baru; dipakai agar timer auto-reset dari
   // scan lama tidak mereset hasil scan yang lebih baru.
   int _resultToken = 0;
+  final Set<int> _selectedTicketIds = {};
 
   @override
   void initState() {
@@ -84,16 +86,44 @@ class _GateScanScreenState extends State<GateScanScreen> {
     );
     _manualController.clear();
 
-    final token = ++_resultToken;
-    final autoTimer = context.read<SettingsProvider>().gateAutoTimer;
+    final isGroup = provider.isSuccess == true && provider.scanResult?['is_group'] == true;
 
-    if (autoTimer) {
-      // Mode timer otomatis: apapun hasilnya, kembali ke ready-to-scan setelah 3 detik.
-      Future.delayed(const Duration(seconds: 3), () => _resetScan(token));
-    } else if (provider.isSuccess != true) {
-      // Mode tombol OK: hasil gagal tetap otomatis reset agar antrian lancar,
-      // sedangkan hasil sukses menunggu operator menekan OK.
-      Future.delayed(const Duration(seconds: 2), () => _resetScan(token));
+    if (isGroup) {
+      final attendeesList = provider.scanResult?['attendees'] as List? ?? [];
+      final scannedTicketId = provider.scanResult?['scanned_ticket_id'];
+
+      _selectedTicketIds.clear();
+      for (final a in attendeesList) {
+        if (a is Map) {
+          final ticketId = a['ticket_id'] as int?;
+          final isCheckedIn = a['is_checked_in'] as bool? ?? false;
+          if (ticketId != null) {
+            if (_scanType == 'IN') {
+              if (!isCheckedIn || ticketId == scannedTicketId) {
+                _selectedTicketIds.add(ticketId);
+              }
+            } else {
+              if (isCheckedIn || ticketId == scannedTicketId) {
+                _selectedTicketIds.add(ticketId);
+              }
+            }
+          }
+        }
+      }
+      setState(() {});
+      // Do not trigger auto timer reset for group checklist screen
+    } else {
+      final token = ++_resultToken;
+      final autoTimer = context.read<SettingsProvider>().gateAutoTimer;
+
+      if (autoTimer) {
+        // Mode timer otomatis: apapun hasilnya, kembali ke ready-to-scan setelah 3 detik.
+        Future.delayed(const Duration(seconds: 3), () => _resetScan(token));
+      } else if (provider.isSuccess != true) {
+        // Mode tombol OK: hasil gagal tetap otomatis reset agar antrian lancar,
+        // sedangkan hasil sukses menunggu operator menekan OK.
+        Future.delayed(const Duration(seconds: 2), () => _resetScan(token));
+      }
     }
   }
 
@@ -134,7 +164,11 @@ class _GateScanScreenState extends State<GateScanScreen> {
                     child: _useCamera ? _buildCameraScanner() : _buildReadyToScan(),
                   ),
                   if (gateProvider.isSuccess != null)
-                    Positioned.fill(child: _buildResultOverlay(gateProvider)),
+                    Positioned.fill(
+                      child: gateProvider.isSuccess == true && gateProvider.scanResult?['is_group'] == true
+                          ? _buildGroupChecklistOverlay(gateProvider)
+                          : _buildResultOverlay(gateProvider),
+                    ),
                 ],
               ),
             ),
@@ -142,6 +176,409 @@ class _GateScanScreenState extends State<GateScanScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  void _submitGroupCheck(GateProvider provider) async {
+    if (_selectedTicketIds.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Silakan pilih minimal 1 peserta.'),
+          backgroundColor: Color(0xFFD95164),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isProcessing = true);
+
+    await provider.bulkCheckin(
+      ticketIds: _selectedTicketIds.toList(),
+      type: _scanType,
+      gateId: widget.gateId,
+      gateName: widget.gateName,
+      deviceId: 'Android-Dev-01',
+    );
+
+    if (!mounted) return;
+
+    _selectedTicketIds.clear();
+    setState(() {
+      _isProcessing = false;
+    });
+  }
+
+  Widget _buildGroupChecklistOverlay(GateProvider provider) {
+    final result = provider.scanResult ?? const <String, dynamic>{};
+    final String customerName = result['visitor']?.toString() ?? '-';
+    final String refNo = result['reference_no']?.toString() ?? '-';
+    final String category = result['category']?.toString() ?? '-';
+    final List attendees = result['attendees'] as List? ?? [];
+    final bool isOut = _scanType == 'OUT';
+    
+    final Color themeColor = isOut ? const Color(0xFFD95164) : const Color(0xFF16A085);
+    final String actionText = isOut ? 'Check-out' : 'Check-in';
+
+    return Stack(
+      children: [
+        // Blurred background
+        Positioned.fill(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(
+              color: const Color(0xFF070B19).withValues(alpha: 0.8),
+            ),
+          ),
+        ),
+        
+        // Centered Card
+        Center(
+          child: FadeInDown(
+            duration: const Duration(milliseconds: 250),
+            child: Container(
+              width: MediaQuery.of(context).size.width * 0.92,
+              constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.82),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F172A), // Slate-900
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.08), width: 1.5),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    blurRadius: 30,
+                    offset: const Offset(0, 15),
+                  )
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Card Header
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF1E293B), // Slate-800
+                      borderRadius: BorderRadius.only(
+                        topLeft: Radius.circular(24),
+                        topRight: Radius.circular(24),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: themeColor.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Icon(Icons.people_alt_rounded, color: themeColor, size: 24),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'DETAIL GRUP - $actionText',
+                                    style: TextStyle(
+                                      color: themeColor,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 1.0,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    customerName,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Ref: $refNo',
+                              style: const TextStyle(
+                                color: Colors.white60,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              'Kategori: $category',
+                              style: const TextStyle(
+                                color: Colors.white60,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Selection Controller Bar (Select All / Unselect All)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'PILIH PESERTA (${_selectedTicketIds.length}/${attendees.length})',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: .5,
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              if (_selectedTicketIds.length == attendees.length) {
+                                _selectedTicketIds.clear();
+                              } else {
+                                for (final a in attendees) {
+                                  if (a is Map && a['ticket_id'] != null) {
+                                    _selectedTicketIds.add(a['ticket_id'] as int);
+                                  }
+                                }
+                              }
+                            });
+                          },
+                          icon: Icon(
+                            _selectedTicketIds.length == attendees.length
+                                ? Icons.deselect_rounded
+                                : Icons.select_all_rounded,
+                            size: 16,
+                            color: themeColor,
+                          ),
+                          label: Text(
+                            _selectedTicketIds.length == attendees.length
+                                ? 'Batal Semua'
+                                : 'Pilih Semua',
+                            style: TextStyle(
+                              color: themeColor,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Attendees list
+                  Flexible(
+                    child: ListView.separated(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                      shrinkWrap: true,
+                      itemCount: attendees.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final a = attendees[index] as Map<String, dynamic>;
+                        final int ticketId = a['ticket_id'] as int;
+                        final String name = a['name']?.toString() ?? '-';
+                        final String cat = a['category']?.toString() ?? '-';
+                        final bool isCheckedIn = a['is_checked_in'] as bool? ?? false;
+                        final String? checkedInAt = a['checked_in_at']?.toString();
+                        final String? checkedInBy = a['checked_in_by']?.toString();
+
+                        final bool isSelected = _selectedTicketIds.contains(ticketId);
+
+                        return InkWell(
+                          onTap: () {
+                            setState(() {
+                              if (isSelected) {
+                                _selectedTicketIds.remove(ticketId);
+                              } else {
+                                _selectedTicketIds.add(ticketId);
+                              }
+                            });
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? themeColor.withValues(alpha: 0.08)
+                                  : const Color(0xFF1E293B).withValues(alpha: 0.4),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isSelected
+                                    ? themeColor.withValues(alpha: 0.4)
+                                    : Colors.white.withValues(alpha: 0.04),
+                                width: 1,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                // Custom Checkbox icon
+                                Container(
+                                  width: 22,
+                                  height: 22,
+                                  decoration: BoxDecoration(
+                                    color: isSelected ? themeColor : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: isSelected ? themeColor : Colors.white38,
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                  child: isSelected
+                                      ? const Icon(Icons.check, color: Colors.white, size: 14)
+                                      : null,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        name,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        cat,
+                                        style: const TextStyle(
+                                          color: Colors.white60,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      if (isCheckedIn) ...[
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Masuk pada: ${checkedInAt ?? "-"} (${checkedInBy ?? "-"})',
+                                          style: const TextStyle(
+                                            color: Color(0xFF4D9D96),
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                // Status badge
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: isCheckedIn
+                                        ? const Color(0xFF16A085).withValues(alpha: 0.15)
+                                        : const Color(0xFF64748B).withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    isCheckedIn ? 'DI DALAM' : 'DI LUAR',
+                                    style: TextStyle(
+                                      color: isCheckedIn ? const Color(0xFF16C7B7) : const Color(0xFF94A3B8),
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+
+                  // Footer actions
+                  Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white70,
+                              side: const BorderSide(color: Colors.white24),
+                              minimumSize: const Size(0, 48),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            onPressed: () {
+                              _selectedTicketIds.clear();
+                              provider.clearStatus();
+                              setState(() => _isProcessing = false);
+                              if (!_useCamera) _manualFocusNode.requestFocus();
+                            },
+                            child: const Text(
+                              'Batal',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 2,
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: themeColor,
+                              foregroundColor: Colors.white,
+                              minimumSize: const Size(0, 48),
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            onPressed: provider.isLoading ? null : () => _submitGroupCheck(provider),
+                            child: provider.isLoading
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : Text(
+                                    'Proses $actionText (${_selectedTicketIds.length})',
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
