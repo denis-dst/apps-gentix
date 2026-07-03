@@ -306,8 +306,10 @@ class _GateScanScreenState extends State<GateScanScreen> {
                           ],
                         ),
                         const SizedBox(height: 12),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        Wrap(
+                          spacing: 16,
+                          runSpacing: 8,
+                          alignment: WrapAlignment.spaceBetween,
                           children: [
                             Text(
                               'Ref: $refNo',

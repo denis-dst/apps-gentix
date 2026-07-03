@@ -20,69 +20,107 @@ class LocalGateDataService {
 
     return openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
-        await db.execute('''
-          CREATE TABLE local_gate_tickets (
-            id INTEGER PRIMARY KEY,
-            ticket_id INTEGER NOT NULL,
-            event_id INTEGER NOT NULL,
-            tenant_id INTEGER NOT NULL,
-            ticket_category_id INTEGER NOT NULL,
-            ticket_code TEXT NOT NULL,
-            wristband_qr TEXT,
-            category_name TEXT,
-            customer_name TEXT,
-            customer_email TEXT,
-            custom_question_label TEXT,
-            custom_question_answer TEXT,
-            reference_no TEXT
-          )
-        ''');
-
-        await db.execute('''
-          CREATE TABLE local_gate_gates (
-            id INTEGER PRIMARY KEY,
-            gate_id INTEGER NOT NULL,
-            event_id INTEGER NOT NULL,
-            gate_name TEXT NOT NULL,
-            allowed_category_ids TEXT
-          )
-        ''');
-
-        await db.execute('''
-          CREATE TABLE local_gate_scan_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            offline_id TEXT NOT NULL,
-            ticket_id INTEGER NOT NULL,
-            event_id INTEGER NOT NULL,
-            tenant_id INTEGER NOT NULL,
-            gate_name TEXT NOT NULL,
-            type TEXT NOT NULL,
-            scanned_at TEXT NOT NULL,
-            device_id TEXT,
-            synced INTEGER NOT NULL DEFAULT 0
-          )
-        ''');
+        await _createTables(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
-        if (oldVersion < 2) {
-          await _addColumnIfMissing(db, 'local_gate_tickets', 'customer_name TEXT');
-          await _addColumnIfMissing(db, 'local_gate_tickets', 'custom_question_label TEXT');
-          await _addColumnIfMissing(db, 'local_gate_tickets', 'custom_question_answer TEXT');
+        if (oldVersion < 3) {
+          // Recreate tables that hold cache data (safe to drop and download again)
+          await db.execute('DROP TABLE IF EXISTS local_gate_tickets');
+          await db.execute('DROP TABLE IF EXISTS local_gate_gates');
+          
+          await db.execute('''
+            CREATE TABLE local_gate_tickets (
+              id INTEGER PRIMARY KEY,
+              ticket_id INTEGER NOT NULL,
+              event_id INTEGER NOT NULL,
+              tenant_id INTEGER NOT NULL,
+              ticket_category_id INTEGER NOT NULL,
+              ticket_code TEXT NOT NULL,
+              wristband_qr TEXT,
+              category_name TEXT,
+              customer_name TEXT,
+              customer_email TEXT,
+              custom_question_label TEXT,
+              custom_question_answer TEXT,
+              reference_no TEXT
+            )
+          ''');
+
+          await db.execute('''
+            CREATE TABLE local_gate_gates (
+              id INTEGER PRIMARY KEY,
+              gate_id INTEGER NOT NULL,
+              event_id INTEGER NOT NULL,
+              gate_name TEXT NOT NULL,
+              allowed_category_ids TEXT
+            )
+          ''');
+          
+          // Ensure logs table exists
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS local_gate_scan_logs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              offline_id TEXT NOT NULL,
+              ticket_id INTEGER NOT NULL,
+              event_id INTEGER NOT NULL,
+              tenant_id INTEGER NOT NULL,
+              gate_name TEXT NOT NULL,
+              type TEXT NOT NULL,
+              scanned_at TEXT NOT NULL,
+              device_id TEXT,
+              synced INTEGER NOT NULL DEFAULT 0
+            )
+          ''');
         }
       },
     );
   }
 
-  Future<void> _addColumnIfMissing(Database db, String table, String columnDefinition) async {
-    final columnName = columnDefinition.split(' ').first;
-    final columns = await db.rawQuery('PRAGMA table_info($table)');
-    final exists = columns.any((column) => column['name'] == columnName);
+  Future<void> _createTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE local_gate_tickets (
+        id INTEGER PRIMARY KEY,
+        ticket_id INTEGER NOT NULL,
+        event_id INTEGER NOT NULL,
+        tenant_id INTEGER NOT NULL,
+        ticket_category_id INTEGER NOT NULL,
+        ticket_code TEXT NOT NULL,
+        wristband_qr TEXT,
+        category_name TEXT,
+        customer_name TEXT,
+        customer_email TEXT,
+        custom_question_label TEXT,
+        custom_question_answer TEXT,
+        reference_no TEXT
+      )
+    ''');
 
-    if (!exists) {
-      await db.execute('ALTER TABLE $table ADD COLUMN $columnDefinition');
-    }
+    await db.execute('''
+      CREATE TABLE local_gate_gates (
+        id INTEGER PRIMARY KEY,
+        gate_id INTEGER NOT NULL,
+        event_id INTEGER NOT NULL,
+        gate_name TEXT NOT NULL,
+        allowed_category_ids TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE local_gate_scan_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        offline_id TEXT NOT NULL,
+        ticket_id INTEGER NOT NULL,
+        event_id INTEGER NOT NULL,
+        tenant_id INTEGER NOT NULL,
+        gate_name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        scanned_at TEXT NOT NULL,
+        device_id TEXT,
+        synced INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
   }
 
   Future<void> replaceEventData({
@@ -176,6 +214,26 @@ class LocalGateDataService {
       'UPDATE local_gate_scan_logs SET synced = 1 WHERE offline_id IN ($placeholders)',
       offlineIds,
     );
+  }
+
+  Future<List<Map<String, dynamic>>> getTicketsByReference(String referenceNo) async {
+    final db = await database;
+    return db.query(
+      'local_gate_tickets',
+      where: 'reference_no = ?',
+      whereArgs: [referenceNo],
+    );
+  }
+
+  Future<Map<String, dynamic>?> findTicketById(int ticketId) async {
+    final db = await database;
+    final rows = await db.query(
+      'local_gate_tickets',
+      where: 'ticket_id = ?',
+      whereArgs: [ticketId],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first;
   }
 
   Future<int> getLocalTicketCount(int eventId) async {

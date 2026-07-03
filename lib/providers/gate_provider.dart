@@ -185,18 +185,77 @@ class GateProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _apiClient.updateBaseUrl(settings.baseUrl);
-      final response = await _apiClient.dio.post('/gate/bulk-checkin', data: {
-        'ticket_ids': ticketIds,
-        'type': type,
-        'gate_id': gateId,
-        'gate_name': gateName,
-        'device_id': deviceId,
-      });
+      if (settings.isOnline) {
+        _apiClient.updateBaseUrl(settings.baseUrl);
+        final response = await _apiClient.dio.post('/gate/bulk-checkin', data: {
+          'ticket_ids': ticketIds,
+          'type': type,
+          'gate_id': gateId,
+          'gate_name': gateName,
+          'device_id': deviceId,
+        });
 
-      _isSuccess = true;
-      _message = response.data['message']?.toString() ?? 'Berhasil memproses check-in masal';
-      _scanResult = response.data;
+        _isSuccess = true;
+        _message = response.data['message']?.toString() ?? 'Berhasil memproses check-in masal';
+        _scanResult = response.data is Map
+            ? Map<String, dynamic>.from(response.data as Map)
+            : null;
+      } else {
+        final List<String> visitorNames = [];
+        final List<String> ticketCodes = [];
+        final List<String> customQuestions = [];
+        String firstCategory = '-';
+        String referenceNo = '-';
+        String customerEmail = '-';
+
+        for (final ticketId in ticketIds) {
+          final t = await _localGateDataService.findTicketById(ticketId);
+          if (t != null) {
+            visitorNames.add(t['customer_name'] ?? '-');
+            ticketCodes.add(t['ticket_code'] ?? '-');
+            if (firstCategory == '-') {
+              firstCategory = t['category_name'] ?? '-';
+              referenceNo = t['reference_no'] ?? '-';
+              customerEmail = t['customer_email'] ?? '-';
+            }
+
+            final qLabel = t['custom_question_label']?.toString();
+            final qAnswer = t['custom_question_answer']?.toString();
+            if (qLabel != null && qLabel != '-' && qAnswer != null && qAnswer != '-') {
+              customQuestions.add('$qLabel: $qAnswer');
+            }
+
+            // Save log locally
+            final offlineId = '${ticketId}_${DateTime.now().millisecondsSinceEpoch}';
+            final scannedAt = DateTime.now().toIso8601String();
+            await _localGateDataService.addScanLog({
+              'offline_id': offlineId,
+              'ticket_id': ticketId,
+              'event_id': t['event_id'],
+              'tenant_id': t['tenant_id'],
+              'gate_name': gateName,
+              'type': type,
+              'scanned_at': scannedAt,
+              'device_id': deviceId,
+              'synced': 0,
+            });
+          }
+        }
+
+        _isSuccess = true;
+        _message = 'Berhasil memproses check-in masal (Offline)';
+        _scanResult = {
+          'status': 'SUCCESS',
+          'message': 'Berhasil memproses check-in masal (Offline)',
+          'visitor': visitorNames.join(', '),
+          'category': firstCategory,
+          'ticket_code': ticketCodes.join(', '),
+          'email': customerEmail,
+          'reference_no': referenceNo,
+          'custom_question_label': customQuestions.isNotEmpty ? 'Pertanyaan Custom' : '-',
+          'custom_question_answer': customQuestions.isNotEmpty ? customQuestions.join('; ') : '-',
+        };
+      }
       _totalScans += ticketIds.length;
       _totalValidScans += ticketIds.length;
 
@@ -381,6 +440,69 @@ class GateProvider extends ChangeNotifier {
       if (!allowedCategoryIds.contains(categoryId)) {
         throw Exception('Wrong Gate! Access Denied for ${ticket['category_name']}');
       }
+    }
+
+    // Group checking for local/offline mode
+    final String? refNo = ticket['reference_no']?.toString();
+    List<Map<String, dynamic>> ticketsInGroup = [];
+    if (refNo != null && refNo.isNotEmpty && refNo != '-') {
+      ticketsInGroup = await _localGateDataService.getTicketsByReference(refNo);
+    }
+
+    if (ticketsInGroup.length > 1) {
+      final totalGroupCount = ticketsInGroup.length;
+      int checkedInCount = 0;
+      int checkedOutCount = 0;
+      int neverCheckedInCount = 0;
+
+      final attendees = <Map<String, dynamic>>[];
+
+      for (final t in ticketsInGroup) {
+        final tLastLog = await _localGateDataService.getLastScanLog(t['ticket_id'] as int);
+        final bool isCheckedIn = tLastLog != null && tLastLog['type'] == 'IN';
+        if (isCheckedIn) {
+          checkedInCount++;
+        } else {
+          checkedOutCount++;
+          if (tLastLog == null) {
+            neverCheckedInCount++;
+          }
+        }
+
+        attendees.add({
+          'ticket_id': t['ticket_id'],
+          'name': t['customer_name'] ?? '-',
+          'category': t['category_name'] ?? '-',
+          'is_checked_in': isCheckedIn,
+          'checked_in_at': tLastLog != null ? (tLastLog['scanned_at']?.toString() ?? '-') : null,
+          'checked_in_by': tLastLog != null ? (tLastLog['gate_name']?.toString() ?? '-') : null,
+          'custom_question_label': t['custom_question_label'] ?? '-',
+          'custom_question_answer': t['custom_question_answer'] ?? '-',
+        });
+      }
+
+      if (type == 'IN') {
+        if (checkedInCount == totalGroupCount) {
+          throw Exception('Seluruh peserta ($totalGroupCount orang) sudah Checkin.');
+        }
+      } else {
+        if (checkedOutCount == totalGroupCount) {
+          throw Exception(neverCheckedInCount == totalGroupCount
+              ? 'Seluruh peserta ($totalGroupCount orang) belum pernah Check-in!'
+              : 'Seluruh peserta ($totalGroupCount orang) sudah berada di luar area!');
+        }
+      }
+
+      return {
+        'status': 'SUCCESS',
+        'is_group': true,
+        'message': 'Detail grup ditemukan',
+        'customer_name': ticket['customer_name'] ?? '-',
+        'category': ticket['category_name'] ?? '-',
+        'scanned_ticket_id': ticket['ticket_id'],
+        'attendees': attendees,
+        'reference_no': refNo,
+      };
     }
 
     final lastLog = await _localGateDataService.getLastScanLog(ticket['ticket_id'] as int);
