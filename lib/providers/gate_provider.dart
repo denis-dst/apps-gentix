@@ -8,6 +8,7 @@ import '../services/local_gate_data_service.dart';
 import '../providers/settings_provider.dart';
 
 import '../models/gate_model.dart';
+import '../models/event_model.dart';
 
 class GateProvider extends ChangeNotifier {
   final SettingsProvider settings;
@@ -29,6 +30,8 @@ class GateProvider extends ChangeNotifier {
   int _totalValidScans = 0;
   int _totalInvalidScans = 0;
   String? _syncMessage;
+  int _localTicketCount = 0;
+  int _pendingSyncCount = 0;
 
   bool get isLoading => _isLoading;
   String? get message => _message;
@@ -40,6 +43,14 @@ class GateProvider extends ChangeNotifier {
   int get totalValidScans => _totalValidScans;
   int get totalInvalidScans => _totalInvalidScans;
   String? get syncMessage => _syncMessage;
+  int get localTicketCount => _localTicketCount;
+  int get pendingSyncCount => _pendingSyncCount;
+
+  Future<void> refreshLocalStats(int eventId) async {
+    _localTicketCount = await _localGateDataService.getLocalTicketCount(eventId);
+    _pendingSyncCount = await _localGateDataService.getPendingLogCount(eventId);
+    notifyListeners();
+  }
 
   Future<void> fetchGates(int eventId) async {
     _isLoading = true;
@@ -62,12 +73,52 @@ class GateProvider extends ChangeNotifier {
             : (_gates.isNotEmpty ? _gates.first : null);
       }
     } on DioException catch (e) {
-      _message = e.response?.data['message'] ?? 'Failed to load gates';
-      _gates = [];
+      // Offline fallback: try loading from local SQLite
+      final localGates = await _localGateDataService.getLocalGates(eventId);
+      if (localGates.isNotEmpty) {
+        _gates = localGates.map((row) {
+          final allowedStr = (row['allowed_category_ids'] as String?) ?? '';
+          final allowedIds = allowedStr.isEmpty
+              ? <int>[]
+              : allowedStr.split(',').where((s) => s.trim().isNotEmpty).map(int.parse).toList();
+          return GateModel(
+            id: row['gate_id'] as int,
+            name: row['gate_name'] as String,
+            allowedCategories: const [],
+            allowedCategoryIds: allowedIds,
+          );
+        }).toList();
+        if (_selectedGate == null && _gates.isNotEmpty) {
+          _selectedGate = _gates.first;
+        }
+      } else {
+        _message = e.response?.data['message'] ?? 'Failed to load gates';
+        _gates = [];
+      }
     } catch (e) {
-      _message = 'Failed to parse gate data: $e';
-      _gates = [];
+      final localGates = await _localGateDataService.getLocalGates(eventId);
+      if (localGates.isNotEmpty) {
+        _gates = localGates.map((row) {
+          final allowedStr = (row['allowed_category_ids'] as String?) ?? '';
+          final allowedIds = allowedStr.isEmpty
+              ? <int>[]
+              : allowedStr.split(',').where((s) => s.trim().isNotEmpty).map(int.parse).toList();
+          return GateModel(
+            id: row['gate_id'] as int,
+            name: row['gate_name'] as String,
+            allowedCategories: const [],
+            allowedCategoryIds: allowedIds,
+          );
+        }).toList();
+        if (_selectedGate == null && _gates.isNotEmpty) {
+          _selectedGate = _gates.first;
+        }
+      } else {
+        _message = 'Failed to parse gate data: $e';
+        _gates = [];
+      }
     } finally {
+      await refreshLocalStats(eventId);
       _isLoading = false;
       notifyListeners();
     }
@@ -241,6 +292,7 @@ class GateProvider extends ChangeNotifier {
             });
           }
         }
+        _pendingSyncCount = await _localGateDataService.getPendingLogCount();
 
         _isSuccess = true;
         _message = 'Berhasil memproses check-in masal (Offline)';
@@ -304,7 +356,7 @@ class GateProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<int> downloadGateData({required int eventId}) async {
+  Future<int> downloadGateData({required int eventId, EventModel? event}) async {
     _apiClient.updateBaseUrl(settings.baseUrl);
     final previousConnectTimeout = _apiClient.dio.options.connectTimeout;
     final previousReceiveTimeout = _apiClient.dio.options.receiveTimeout;
@@ -321,6 +373,19 @@ class GateProvider extends ChangeNotifier {
 
       final List tickets = response.data['tickets'] ?? [];
       final List gates = response.data['gates'] ?? [];
+
+      // Cache event metadata to SQLite if provided
+      if (event != null) {
+        await _localGateDataService.saveEvent({
+          'event_id': event.id,
+          'tenant_id': event.tenantId,
+          'name': event.name,
+          'venue': event.venue,
+          'event_start_date': event.eventStartDate.toIso8601String(),
+          'security_code': event.securityCode,
+          'downloaded_at': DateTime.now().toIso8601String(),
+        });
+      }
 
       await _localGateDataService.replaceEventData(
         eventId: eventId,
@@ -353,7 +418,11 @@ class GateProvider extends ChangeNotifier {
         }).toList(),
       );
 
-      return _localGateDataService.getLocalTicketCount(eventId);
+      _localTicketCount = await _localGateDataService.getLocalTicketCount(eventId);
+      _pendingSyncCount = await _localGateDataService.getPendingLogCount(eventId);
+      _syncMessage = '$_localTicketCount data e-voucher berhasil diunduh ke lokal.';
+      notifyListeners();
+      return _localTicketCount;
     } on DioException catch (e) {
       if (e.type == DioExceptionType.connectionTimeout ||
           e.type == DioExceptionType.receiveTimeout ||
@@ -368,16 +437,21 @@ class GateProvider extends ChangeNotifier {
     }
   }
 
-  Future<int> uploadPendingGateLogs() async {
+  Future<int> uploadPendingGateLogs([int? eventId]) async {
     _apiClient.updateBaseUrl(settings.baseUrl);
     final pendingLogs = await _localGateDataService.getPendingScanLogs();
-    if (pendingLogs.isEmpty) {
+    final targetLogs = eventId != null
+        ? pendingLogs.where((l) => l['event_id'] == eventId).toList()
+        : pendingLogs;
+
+    if (targetLogs.isEmpty) {
       _syncMessage = 'Tidak ada data scan yang perlu di-upload.';
+      _pendingSyncCount = 0;
       notifyListeners();
       return 0;
     }
 
-    final payload = pendingLogs.map((log) {
+    final payload = targetLogs.map((log) {
       return {
         'offline_id': log['offline_id'],
         'ticket_id': log['ticket_id'],
@@ -392,10 +466,16 @@ class GateProvider extends ChangeNotifier {
 
     await _apiClient.dio.post('/gate/sync', data: {'logs': payload});
     await _localGateDataService.markLogsSynced(
-      pendingLogs.map((log) => log['offline_id'].toString()).toList(),
+      targetLogs.map((log) => log['offline_id'].toString()).toList(),
     );
 
-    _syncMessage = '${payload.length} data scan berhasil di-upload.';
+    if (eventId != null) {
+      _pendingSyncCount = await _localGateDataService.getPendingLogCount(eventId);
+    } else {
+      _pendingSyncCount = await _localGateDataService.getPendingLogCount();
+    }
+
+    _syncMessage = '${payload.length} data scan berhasil di-upload ke server.';
     notifyListeners();
     return payload.length;
   }
@@ -532,6 +612,7 @@ class GateProvider extends ChangeNotifier {
       'device_id': deviceId,
       'synced': 0,
     });
+    _pendingSyncCount = await _localGateDataService.getPendingLogCount(eventId);
 
     return {
       'message': 'Access Granted: $type',

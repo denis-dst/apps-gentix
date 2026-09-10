@@ -13,6 +13,8 @@ class AuthProvider extends ChangeNotifier {
 
   AuthProvider(this.settings) {
     _apiClient = ApiClient(settings.baseUrl);
+    // On fresh app start (e.g. after swipeout), clear any lingering stored token
+    _storage.delete(key: 'token');
   }
 
   UserModel? _user;
@@ -25,6 +27,15 @@ class AuthProvider extends ChangeNotifier {
   bool get isAuthenticated => _user != null;
 
   Future<bool> login(String email, String password) async {
+    final cleanEmail = email.trim();
+    final cleanPassword = password.trim();
+
+    if (cleanEmail.isEmpty || cleanPassword.isEmpty) {
+      _error = 'Email dan password tidak boleh kosong.';
+      notifyListeners();
+      return false;
+    }
+
     _isLoading = true;
     _error = null;
     notifyListeners();
@@ -32,8 +43,8 @@ class AuthProvider extends ChangeNotifier {
     try {
       _apiClient.updateBaseUrl(settings.baseUrl);
       final response = await _apiClient.dio.post('/login', data: {
-        'email': email,
-        'password': password,
+        'email': cleanEmail,
+        'password': cleanPassword,
         'device_name': 'android_mobile_app',
       });
 
@@ -52,7 +63,7 @@ class AuthProvider extends ChangeNotifier {
       return false;
     } catch (e) {
       _isLoading = false;
-      _error = 'An unexpected error occurred';
+      _error = 'An unexpected error occurred: $e';
       notifyListeners();
       return false;
     }

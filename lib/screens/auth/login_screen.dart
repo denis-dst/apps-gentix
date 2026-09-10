@@ -5,7 +5,6 @@ import '../../providers/auth_provider.dart';
 import '../../core/constants.dart';
 
 import '../settings/settings_screen.dart';
-import '../../providers/settings_provider.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -22,7 +21,6 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-    final settings = context.watch<SettingsProvider>();
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -147,30 +145,8 @@ class _LoginScreenState extends State<LoginScreen> {
                               style: const TextStyle(color: AppConstants.errorColor),
                             ),
                           ),
-                        if (!settings.isConnected)
-                          Container(
-                            margin: const EdgeInsets.only(bottom: 24),
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.orange.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.orange.withOpacity(0.5)),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.warning_amber_rounded, color: Colors.orange),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    'Not connected to server. Check settings.',
-                                    style: TextStyle(color: Colors.orange[300], fontSize: 13),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
                         ElevatedButton(
-                          onPressed: (auth.isLoading || !settings.isConnected)
+                          onPressed: auth.isLoading
                               ? null
                               : () async {
                                   await auth.login(_emailController.text, _passwordController.text);

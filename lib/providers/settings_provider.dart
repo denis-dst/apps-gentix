@@ -19,13 +19,7 @@ class SettingsProvider extends ChangeNotifier {
   bool get isConnected => _isConnected;
   bool get gateAutoTimer => _gateAutoTimer;
 
-  String get baseUrl {
-    if (_isOnline) {
-      return _apiUrl;
-    } else {
-      return 'http://$_localIp/gentix-apps/api';
-    }
-  }
+  String get baseUrl => _apiUrl;
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
@@ -34,17 +28,21 @@ class SettingsProvider extends ChangeNotifier {
     _localIp = _prefs.getString('localIp') ?? '192.168.202.253';
     _gateAutoTimer = _prefs.getBool('gateAutoTimer') ?? false;
     notifyListeners();
+
+    // Silently check connection in background on init
+    checkConnection().catchError((_) => false);
   }
 
   Future<void> setMode(bool online) async {
     _isOnline = online;
-    _isConnected = false;
+    await _prefs.setBool('isOnline', online);
     notifyListeners();
   }
 
   Future<void> setApiUrl(String url) async {
-    _apiUrl = url;
+    _apiUrl = url.trim();
     _isConnected = false;
+    await _prefs.setString('apiUrl', _apiUrl);
     notifyListeners();
   }
 

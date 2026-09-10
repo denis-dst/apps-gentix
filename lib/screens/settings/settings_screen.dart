@@ -180,11 +180,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
             const SizedBox(height: 28),
 
-            // ── Data Sync Section (hanya Local) ──
-            if (!settings.isOnline) ...[
-              _buildDataSyncCard(),
-              const SizedBox(height: 28),
-            ],
+            // ── Data Sync Section ──
+            _buildDataSyncCard(),
+            const SizedBox(height: 28),
 
             // ── Connection Status ──
             _buildConnectionStatus(settings),
@@ -717,7 +715,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return;
       }
 
-      final total = await gateProvider.downloadGateData(eventId: event.id);
+      final total = await gateProvider.downloadGateData(eventId: event.id, event: event);
       if (!mounted) return;
       messenger.showSnackBar(
         SnackBar(
@@ -725,7 +723,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               const Icon(Icons.download_done_rounded, color: Colors.white),
               const SizedBox(width: 8),
-              Text('$total tiket wristband berhasil diunduh!'),
+              Text('$total data tiket e-voucher berhasil diunduh!'),
             ],
           ),
           backgroundColor: const Color(0xFF22C55E),

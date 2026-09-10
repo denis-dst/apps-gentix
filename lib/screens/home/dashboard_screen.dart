@@ -8,6 +8,7 @@ import '../../models/gate_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/event_provider.dart';
 import '../../providers/gate_provider.dart';
+import '../../providers/settings_provider.dart';
 import '../gate/gate_scan_screen.dart';
 import '../settings/settings_screen.dart';
 import 'event_selection_screen.dart';
@@ -20,6 +21,9 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  bool _isDownloading = false;
+  bool _isUploading = false;
+
   @override
   void initState() {
     super.initState();
@@ -38,6 +42,90 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final event = eventProvider.selectedEvent ?? eventProvider.events.first;
     eventProvider.selectEvent(event);
     await gateProvider.fetchGates(event.id);
+    await gateProvider.refreshLocalStats(event.id);
+  }
+
+  Future<void> _downloadOfflineData() async {
+    final event = context.read<EventProvider>().selectedEvent;
+    if (event == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pilih event terlebih dahulu.')),
+      );
+      return;
+    }
+
+    setState(() => _isDownloading = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final gateProvider = context.read<GateProvider>();
+      final count = await gateProvider.downloadGateData(eventId: event.id, event: event);
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.download_done_rounded, color: Colors.white),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('$count data tiket e-voucher berhasil diunduh ke lokal!'),
+              ),
+            ],
+          ),
+          backgroundColor: const Color(0xFF22C55E),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Gagal unduh data: $e'),
+          backgroundColor: AppConstants.errorColor,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isDownloading = false);
+    }
+  }
+
+  Future<void> _uploadOfflineLogs() async {
+    final event = context.read<EventProvider>().selectedEvent;
+    setState(() => _isUploading = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final gateProvider = context.read<GateProvider>();
+      final count = await gateProvider.uploadPendingGateLogs(event?.id);
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.cloud_upload_rounded, color: Colors.white),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(count == 0
+                    ? 'Tidak ada data scan offline untuk di-upload.'
+                    : '$count data scan berhasil di-upload ke server!'),
+              ),
+            ],
+          ),
+          backgroundColor: const Color(0xFF22C55E),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Gagal upload data: $e'),
+          backgroundColor: AppConstants.errorColor,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isUploading = false);
+    }
   }
 
   Future<void> _openSelectionFlow({required bool launchScannerOnApply}) async {
@@ -81,6 +169,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     final eventProvider = context.watch<EventProvider>();
     final gateProvider = context.watch<GateProvider>();
+    final settings = context.watch<SettingsProvider>();
     final auth = context.read<AuthProvider>();
     final selectedEvent = eventProvider.selectedEvent;
     final selectedGate = gateProvider.selectedGate;
@@ -111,7 +200,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 padding: const EdgeInsets.fromLTRB(22, 18, 22, 28),
                 children: [
                   _buildEventCard(selectedEvent, selectedGate),
-                  const SizedBox(height: 34),
+                  const SizedBox(height: 18),
+                  _buildOfflineSyncCard(selectedEvent, gateProvider, settings),
+                  const SizedBox(height: 28),
                   const Text(
                     'QUICK ACTIONS',
                     style: TextStyle(
@@ -381,6 +472,244 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Text(
             value.toString(),
             style: const TextStyle(color: Color(0xFF172033), fontSize: 22, fontWeight: FontWeight.w900),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOfflineSyncCard(
+    EventModel? event,
+    GateProvider gateProvider,
+    SettingsProvider settings,
+  ) {
+    final hasPending = gateProvider.pendingSyncCount > 0;
+    final isOnlineMode = settings.isOnline;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF132A55).withValues(alpha: .06),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: (isOnlineMode ? const Color(0xFF16C7B7) : const Color(0xFF6366F1))
+                      .withValues(alpha: .12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  isOnlineMode ? Icons.cloud_done_rounded : Icons.offline_pin_rounded,
+                  color: isOnlineMode ? const Color(0xFF0D9488) : const Color(0xFF4F46E5),
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Mode & Sinkronisasi Offline',
+                      style: TextStyle(
+                        color: Color(0xFF172033),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      isOnlineMode
+                          ? 'Scan Online (Server Cloud)'
+                          : 'Scan Offline (Data Lokal HP)',
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: () async {
+                  await settings.setMode(!settings.isOnline);
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isOnlineMode
+                        ? const Color(0xFFE6FFFA)
+                        : const Color(0xFFEEF2FF),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: isOnlineMode
+                          ? const Color(0xFF16C7B7).withValues(alpha: .5)
+                          : const Color(0xFF6366F1).withValues(alpha: .5),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.swap_horiz_rounded,
+                        size: 14,
+                        color: isOnlineMode ? const Color(0xFF0D9488) : const Color(0xFF4F46E5),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        isOnlineMode ? 'ONLINE' : 'OFFLINE',
+                        style: TextStyle(
+                          color: isOnlineMode ? const Color(0xFF0D9488) : const Color(0xFF4F46E5),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Row(
+                    children: [
+                      const Icon(Icons.qr_code_2_rounded, size: 20, color: Color(0xFF2563EB)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${gateProvider.localTicketCount}',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFF172033),
+                              ),
+                            ),
+                            const Text(
+                              'E-Voucher Lokal',
+                              style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(width: 1, height: 32, color: const Color(0xFFE2E8F0)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.pending_actions_rounded,
+                        size: 20,
+                        color: hasPending ? const Color(0xFFEA580C) : const Color(0xFF10B981),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${gateProvider.pendingSyncCount}',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                color: hasPending ? const Color(0xFFEA580C) : const Color(0xFF172033),
+                              ),
+                            ),
+                            const Text(
+                              'Menunggu Upload',
+                              style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: (_isDownloading || event == null) ? null : _downloadOfflineData,
+                  icon: _isDownloading
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.download_rounded, size: 18),
+                  label: Text(
+                    _isDownloading ? 'Mengunduh...' : 'Unduh E-Voucher',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF1E293B),
+                    side: const BorderSide(color: Color(0xFFCBD5E1)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _isUploading ? null : _uploadOfflineLogs,
+                  icon: _isUploading
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        )
+                      : const Icon(Icons.cloud_upload_rounded, size: 18),
+                  label: Text(
+                    _isUploading ? 'Mengupload...' : 'Upload Laporan',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: hasPending ? const Color(0xFFF97316) : const Color(0xFF4F46E5),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

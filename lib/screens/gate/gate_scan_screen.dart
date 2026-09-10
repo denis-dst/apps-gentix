@@ -689,7 +689,7 @@ class _GateScanScreenState extends State<GateScanScreen> {
           borderRadius: BorderRadius.circular(8),
         ),
         child: Text(
-          settings.isOnline ? 'ONLINE' : 'LOCAL',
+          settings.isOnline ? 'ONLINE' : 'OFFLINE',
           style: const TextStyle(
             color: Colors.white,
             fontSize: 11,

@@ -20,7 +20,7 @@ class LocalGateDataService {
 
     return openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -74,6 +74,21 @@ class LocalGateDataService {
             )
           ''');
         }
+
+        if (oldVersion < 4) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS local_gate_events (
+              id INTEGER PRIMARY KEY,
+              event_id INTEGER NOT NULL UNIQUE,
+              tenant_id INTEGER NOT NULL,
+              name TEXT NOT NULL,
+              venue TEXT,
+              event_start_date TEXT,
+              security_code TEXT,
+              downloaded_at TEXT
+            )
+          ''');
+        }
       },
     );
   }
@@ -119,6 +134,19 @@ class LocalGateDataService {
         scanned_at TEXT NOT NULL,
         device_id TEXT,
         synced INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS local_gate_events (
+        id INTEGER PRIMARY KEY,
+        event_id INTEGER NOT NULL UNIQUE,
+        tenant_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        venue TEXT,
+        event_start_date TEXT,
+        security_code TEXT,
+        downloaded_at TEXT
       )
     ''');
   }
@@ -242,6 +270,50 @@ class LocalGateDataService {
       'SELECT COUNT(*) as total FROM local_gate_tickets WHERE event_id = ?',
       [eventId],
     );
+    return (result.first['total'] as int?) ?? 0;
+  }
+
+  Future<void> saveEvent(Map<String, dynamic> event) async {
+    final db = await database;
+    await db.insert(
+      'local_gate_events',
+      event,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getLocalEvents() async {
+    final db = await database;
+    return db.query('local_gate_events', orderBy: 'event_start_date DESC');
+  }
+
+  Future<Map<String, dynamic>?> getLocalEvent(int eventId) async {
+    final db = await database;
+    final rows = await db.query(
+      'local_gate_events',
+      where: 'event_id = ?',
+      whereArgs: [eventId],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  Future<List<Map<String, dynamic>>> getLocalGates(int eventId) async {
+    final db = await database;
+    return db.query(
+      'local_gate_gates',
+      where: 'event_id = ?',
+      whereArgs: [eventId],
+    );
+  }
+
+  Future<int> getPendingLogCount([int? eventId]) async {
+    final db = await database;
+    final String sql = eventId != null
+        ? 'SELECT COUNT(*) as total FROM local_gate_scan_logs WHERE synced = 0 AND event_id = ?'
+        : 'SELECT COUNT(*) as total FROM local_gate_scan_logs WHERE synced = 0';
+    final List<dynamic> args = eventId != null ? [eventId] : [];
+    final result = await db.rawQuery(sql, args);
     return (result.first['total'] as int?) ?? 0;
   }
 }
