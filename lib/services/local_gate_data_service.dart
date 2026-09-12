@@ -175,13 +175,51 @@ class LocalGateDataService {
 
   Future<Map<String, dynamic>?> findTicket(String code, int eventId) async {
     final db = await database;
+    final cleanCode = code.trim();
     final rows = await db.query(
       'local_gate_tickets',
       where: 'event_id = ? AND (ticket_code = ? OR wristband_qr = ?)',
-      whereArgs: [eventId, code, code],
+      whereArgs: [eventId, cleanCode, cleanCode],
       limit: 1,
     );
-    return rows.isEmpty ? null : rows.first;
+    if (rows.isNotEmpty) return rows.first;
+
+    // Pattern match for pre-printed wristbands: WB-C{categoryId}-{index}
+    final regex = RegExp(r'^WB[-_]?(?:C|CAT)?(\d+)[-_](\d+)$', caseSensitive: false);
+    final match = regex.firstMatch(cleanCode);
+    if (match != null) {
+      final categoryId = int.tryParse(match.group(1) ?? '');
+      final indexNum = match.group(2) ?? '1';
+      if (categoryId != null) {
+        final catRows = await db.query(
+          'local_gate_tickets',
+          columns: ['category_name', 'tenant_id'],
+          where: 'event_id = ? AND ticket_category_id = ?',
+          whereArgs: [eventId, categoryId],
+          limit: 1,
+        );
+        final catName = catRows.isNotEmpty ? (catRows.first['category_name']?.toString() ?? 'Gelang Fisik') : 'Gelang Fisik';
+        final tenantId = catRows.isNotEmpty ? (catRows.first['tenant_id'] as int? ?? 1) : 1;
+        final syntheticTicketId = 900000 + (int.tryParse(indexNum) ?? 1);
+        final syntheticTicket = {
+          'ticket_id': syntheticTicketId,
+          'event_id': eventId,
+          'tenant_id': tenantId,
+          'ticket_category_id': categoryId,
+          'ticket_code': cleanCode,
+          'wristband_qr': cleanCode,
+          'category_name': catName,
+          'customer_name': 'Gelang Fisik #',
+          'customer_email': '-',
+          'custom_question_label': '-',
+          'custom_question_answer': '-',
+          'reference_no': 'OFFLINE-WB',
+        };
+        try { await db.insert('local_gate_tickets', syntheticTicket); } catch (_) {}
+        return syntheticTicket;
+      }
+    }
+    return null;
   }
 
   Future<List<int>> getAllowedCategoryIds({
