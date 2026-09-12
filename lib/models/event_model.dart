@@ -6,8 +6,10 @@ class EventModel {
   final DateTime eventStartDate;
   final String? backgroundImage;
   final String? securityCode;
+  final String purchaseFlow;
 
   bool get requiresSecurityCode => (securityCode ?? '').trim().isNotEmpty;
+  bool get isRedeemFlow => purchaseFlow == 'redeem';
 
   EventModel({
     required this.id,
@@ -17,6 +19,7 @@ class EventModel {
     required this.eventStartDate,
     this.backgroundImage,
     this.securityCode,
+    this.purchaseFlow = 'direct',
   });
 
   factory EventModel.fromJson(Map<String, dynamic> json) {
@@ -32,6 +35,7 @@ class EventModel {
           : DateTime.fromMillisecondsSinceEpoch(0),
       backgroundImage: json['background_image']?.toString(),
       securityCode: json['security_code']?.toString(),
+      purchaseFlow: (json['purchase_flow']?.toString() ?? 'direct').toLowerCase(),
     );
   }
 }

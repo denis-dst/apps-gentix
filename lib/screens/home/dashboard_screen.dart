@@ -67,7 +67,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               const Icon(Icons.download_done_rounded, color: Colors.white),
               const SizedBox(width: 8),
               Expanded(
-                child: Text('$count data tiket e-voucher berhasil diunduh ke lokal!'),
+                child: Text('$count data tiket ${event.isRedeemFlow ? "gelang (wristband)" : "e-voucher"} berhasil diunduh ke lokal!'),
               ),
             ],
           ),

@@ -420,7 +420,11 @@ class GateProvider extends ChangeNotifier {
 
       _localTicketCount = await _localGateDataService.getLocalTicketCount(eventId);
       _pendingSyncCount = await _localGateDataService.getPendingLogCount(eventId);
-      _syncMessage = '$_localTicketCount data e-voucher berhasil diunduh ke lokal.';
+            final purchaseFlow = response.data['purchase_flow']?.toString() ?? (event?.purchaseFlow ?? 'direct');
+      final isRedeem = purchaseFlow == 'redeem';
+      _syncMessage = isRedeem
+          ? '$_localTicketCount data tiket gelang (wristband) berhasil diunduh ke lokal.'
+          : '$_localTicketCount data tiket e-voucher berhasil diunduh ke lokal.';
       notifyListeners();
       return _localTicketCount;
     } on DioException catch (e) {
