@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'core/constants.dart';
@@ -8,6 +8,8 @@ import 'providers/gate_provider.dart';
 import 'providers/pos_provider.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/home/dashboard_screen.dart';
+import 'screens/home/pos_dashboard_screen.dart';
+import 'screens/home/action_selection_screen.dart';
 
 import 'providers/settings_provider.dart';
 
@@ -94,7 +96,14 @@ class _AuthWrapperState extends State<AuthWrapper> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     if (auth.isAuthenticated) {
-      return const DashboardScreen();
+      final role = auth.user?.role;
+      if (role == 'Petugas Loket') {
+        return const PosDashboardScreen();
+      } else if (role == 'Petugas Gate') {
+        return const DashboardScreen();
+      } else {
+        return const ActionSelectionScreen();
+      }
     }
     return const LoginScreen();
   }

@@ -689,7 +689,7 @@ class _GateScanScreenState extends State<GateScanScreen> {
           borderRadius: BorderRadius.circular(8),
         ),
         child: Text(
-          settings.isOnline ? 'ONLINE' : 'OFFLINE',
+          settings.isOnline ? 'ONLINE' : 'LOCAL',
           style: const TextStyle(
             color: Colors.white,
             fontSize: 11,
@@ -1088,6 +1088,13 @@ class _GateScanScreenState extends State<GateScanScreen> {
     final Color bgColor = success ? AppConstants.successColor : AppConstants.errorColor;
     final bool autoTimer = context.watch<SettingsProvider>().gateAutoTimer;
     final result = provider.scanResult ?? const <String, dynamic>{};
+    final bool isGroup = result['is_group'] == true;
+    final List<Map<String, dynamic>> attendees = (result['attendees'] is List)
+        ? (result['attendees'] as List)
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList()
+        : <Map<String, dynamic>>[];
     final customQuestionLabel = result['custom_question_label']?.toString() ?? '-';
     final customQuestionAnswer = result['custom_question_answer']?.toString() ?? '-';
     final hasCustomQuestion = customQuestionLabel.trim().isNotEmpty &&
@@ -1102,8 +1109,6 @@ class _GateScanScreenState extends State<GateScanScreen> {
         child: SafeArea(
           child: LayoutBuilder(
             builder: (context, constraints) {
-              // Skala mengikuti ukuran layar agar area hijau/putih tidak melebar
-              // di layar besar dan tidak meluber (menutup tombol OK) di layar kecil.
               final bool compact = constraints.maxHeight < 560;
               final double iconSize = compact ? 62 : 84;
               final double cardWidth =
@@ -1111,7 +1116,6 @@ class _GateScanScreenState extends State<GateScanScreen> {
 
               return Column(
                 children: [
-                  // Konten hasil scan — scrollable agar tidak pernah menutupi tombol OK.
                   Expanded(
                     child: SingleChildScrollView(
                       padding: EdgeInsets.symmetric(
@@ -1156,37 +1160,43 @@ class _GateScanScreenState extends State<GateScanScreen> {
                                     style: const TextStyle(color: Colors.white, fontSize: 15),
                                   ),
                                   SizedBox(height: compact ? 12 : 18),
-                                  Container(
-                                    width: cardWidth,
-                                    padding: const EdgeInsets.all(16),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withValues(alpha: 0.14),
-                                      borderRadius: BorderRadius.circular(16),
-                                      border: Border.all(
-                                        color: Colors.white.withValues(alpha: 0.18),
-                                      ),
-                                    ),
-                                    child: Column(
-                                      children: [
-                                        _buildOverlayInfoRow('Kode Tiket',
-                                            result['ticket_code']?.toString() ?? '-'),
-                                        _buildOverlayInfoRow(
-                                            'Nama Customer',
-                                            result['visitor']?.toString() ??
-                                                result['customer_name']?.toString() ??
-                                                '-'),
-                                        if (hasCustomQuestion)
-                                          _buildOverlayInfoRow(
-                                              customQuestionLabel, customQuestionAnswer),
-                                        _buildOverlayInfoRow('Kategori',
-                                            result['category']?.toString() ?? '-'),
-                                        _buildOverlayInfoRow(
-                                            'Email', result['email']?.toString() ?? '-'),
-                                        _buildOverlayInfoRow('No. Transaksi',
-                                            result['reference_no']?.toString() ?? '-'),
-                                      ],
-                                    ),
-                                  ),
+                                  isGroup
+                                      ? _buildGroupCheckinPanel(
+                                          result: result,
+                                          attendees: attendees,
+                                          bgColor: bgColor,
+                                        )
+                                      : Container(
+                                          width: cardWidth,
+                                          padding: const EdgeInsets.all(16),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white.withValues(alpha: 0.14),
+                                            borderRadius: BorderRadius.circular(16),
+                                            border: Border.all(
+                                              color: Colors.white.withValues(alpha: 0.18),
+                                            ),
+                                          ),
+                                          child: Column(
+                                            children: [
+                                              _buildOverlayInfoRow('Kode Tiket',
+                                                  result['ticket_code']?.toString() ?? '-'),
+                                              _buildOverlayInfoRow(
+                                                  'Nama Customer',
+                                                  result['visitor']?.toString() ??
+                                                      result['customer_name']?.toString() ??
+                                                      '-'),
+                                              if (hasCustomQuestion)
+                                                _buildOverlayInfoRow(
+                                                    customQuestionLabel, customQuestionAnswer),
+                                              _buildOverlayInfoRow('Kategori',
+                                                  result['category']?.toString() ?? '-'),
+                                              _buildOverlayInfoRow(
+                                                  'Email', result['email']?.toString() ?? '-'),
+                                              _buildOverlayInfoRow('No. Transaksi',
+                                                  result['reference_no']?.toString() ?? '-'),
+                                            ],
+                                          ),
+                                        ),
                                 ],
                               ),
                             ),
@@ -1237,6 +1247,233 @@ class _GateScanScreenState extends State<GateScanScreen> {
         ),
       ),
     );
+  }
+
+  Widget _buildGroupCheckinPanel({
+    required Map<String, dynamic> result,
+    required List<Map<String, dynamic>> attendees,
+    required Color bgColor,
+  }) {
+    final Set<int> initialSelection = attendees
+        .where(_isAttendeeEligibleForCurrentGate)
+        .map((attendee) => _asInt(attendee['ticket_id']))
+        .whereType<int>()
+        .toSet();
+    final selectedIds = <int>{...initialSelection};
+    bool isSubmitting = false;
+
+    return StatefulBuilder(
+      builder: (context, setPanelState) {
+        return Container(
+          width: 430,
+          constraints: const BoxConstraints(maxHeight: 430),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.14),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildOverlayInfoRow('Nama Customer', result['visitor']?.toString() ?? '-'),
+              _buildOverlayInfoRow('No. Transaksi', result['reference_no']?.toString() ?? '-'),
+              const SizedBox(height: 10),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: attendees.length,
+                  separatorBuilder: (_, __) => Divider(
+                    height: 1,
+                    color: Colors.white.withValues(alpha: 0.18),
+                  ),
+                  itemBuilder: (context, index) {
+                    final attendee = attendees[index];
+                    final ticketId = _asInt(attendee['ticket_id']);
+                    final isEligible = _isAttendeeEligibleForCurrentGate(attendee);
+                    final isSelected = ticketId != null && selectedIds.contains(ticketId);
+                    final isCheckedIn = attendee['is_checked_in'] == true;
+                    final label = attendee['custom_question_label']?.toString() ?? '-';
+                    final answer = attendee['custom_question_answer']?.toString() ?? '-';
+                    final hasCustomQuestion = label != '-' && answer != '-';
+
+                    return InkWell(
+                      onTap: ticketId == null || !isEligible
+                          ? null
+                          : () {
+                              setPanelState(() {
+                                if (isSelected) {
+                                  selectedIds.remove(ticketId);
+                                } else {
+                                  selectedIds.add(ticketId);
+                                }
+                              });
+                            },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Checkbox(
+                              value: isSelected,
+                              onChanged: ticketId == null || !isEligible
+                                  ? null
+                                  : (value) {
+                                      setPanelState(() {
+                                        if (value == true) {
+                                          selectedIds.add(ticketId);
+                                        } else {
+                                          selectedIds.remove(ticketId);
+                                        }
+                                      });
+                                    },
+                              activeColor: Colors.white,
+                              checkColor: bgColor,
+                              side: const BorderSide(color: Colors.white, width: 1.5),
+                            ),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    attendee['name']?.toString() ?? '-',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    attendee['ticket_code']?.toString() ?? '-',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  if (hasCustomQuestion) ...[
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      '$label: $answer',
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              !isEligible
+                                  ? 'Tidak bisa'
+                                  : isCheckedIn
+                                      ? 'Sudah IN'
+                                      : 'Belum IN',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                height: 46,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: bgColor,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                  ),
+                  onPressed: selectedIds.isEmpty || isSubmitting
+                      ? null
+                      : () async {
+                          setPanelState(() => isSubmitting = true);
+                          try {
+                            await context.read<GateProvider>().bulkCheckin(
+                                  ticketIds: selectedIds.toList(),
+                                  type: _scanType,
+                                  gateId: widget.gateId,
+                                  gateName: widget.gateName,
+                                  deviceId: 'Android-Dev-01',
+                                );
+                            if (!mounted) return;
+                            context.read<GateProvider>().clearStatus();
+                            setState(() => _isProcessing = false);
+                            if (!_useCamera) _manualFocusNode.requestFocus();
+                          } catch (error) {
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))),
+                            );
+                            setPanelState(() => isSubmitting = false);
+                          }
+                        },
+                  child: Text(
+                    isSubmitting
+                        ? 'MEMPROSES...'
+                        : '${_scanType == 'OUT' ? 'CHECKOUT' : 'CHECK-IN'} ${selectedIds.length} PESERTA',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: .5,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  bool _isAttendeeEligibleForCurrentGate(Map<String, dynamic> attendee) {
+    final ticketId = _asInt(attendee['ticket_id']);
+    final categoryId = _asInt(attendee['ticket_category_id']);
+    final isCheckedIn = attendee['is_checked_in'] == true;
+    final categoryAllowed = widget.gateId == null ||
+        widget.allowedCategoryIds.isEmpty ||
+        (categoryId != null && widget.allowedCategoryIds.contains(categoryId));
+
+    if (ticketId == null || !categoryAllowed) {
+      return false;
+    }
+
+    return _scanType == 'OUT' ? isCheckedIn : !isCheckedIn;
+  }
+
+  int? _asInt(dynamic value) {
+    if (value is int) {
+      return value;
+    }
+
+    if (value is num) {
+      return value.toInt();
+    }
+
+    if (value is String) {
+      return int.tryParse(value);
+    }
+
+    return null;
   }
 
   Widget _buildOverlayInfoRow(String label, String value) {
