@@ -39,14 +39,23 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
   @override
   void initState() {
     super.initState();
-    _initCamera();
   }
 
   Future<void> _initCamera() async {
-    final cameras = await availableCameras();
-    if (cameras.isNotEmpty) {
-      _cameraController = CameraController(cameras.first, ResolutionPreset.medium);
-      await _cameraController!.initialize();
+    if (_cameraController != null && _cameraController!.value.isInitialized) return;
+    try {
+      final cameras = await availableCameras();
+      if (cameras.isNotEmpty) {
+        final frontCamera = cameras.firstWhere(
+          (c) => c.lensDirection == CameraLensDirection.front,
+          orElse: () => cameras.first,
+        );
+        _cameraController = CameraController(frontCamera, ResolutionPreset.medium);
+        await _cameraController!.initialize();
+        if (mounted) setState(() {});
+      }
+    } catch (e) {
+      debugPrint("Camera init error: $e");
     }
   }
 
@@ -81,6 +90,15 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
         );
       }
     }
+  }
+
+  Future<void> _startPhotoFlow() async {
+    setState(() {
+      _showTicketInfo = false;
+      _isTakingPhoto = true;
+    });
+    await _initCamera();
+    _startPhotoTimer();
   }
 
   void _startPhotoTimer() {
@@ -222,6 +240,8 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
 
   Widget _buildTicketInfo(Map<String, dynamic>? info) {
     if (info == null) return const Center(child: Text('No Info Available'));
+    final bool isAlreadyRedeemed = info['redeemed_at'] != null;
+
     return Padding(
       padding: const EdgeInsets.all(24.0),
       child: Column(
@@ -229,29 +249,37 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
           FadeInDown(
             child: Card(
               color: AppConstants.cardBg,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
               child: Padding(
                 padding: const EdgeInsets.all(20.0),
                 child: Column(
                   children: [
-                    const Icon(Icons.confirmation_number, color: AppConstants.primaryColor, size: 48),
-                    const SizedBox(height: 16),
-                    Text(info['name'] ?? 'Unknown Customer', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-                    Text(info['category'] ?? 'General Admission', style: const TextStyle(color: Colors.grey)),
-                    const Divider(height: 32, color: Colors.white10),
+                    if (isAlreadyRedeemed && info['photo'] != null) ...[
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: Image.network(info['photo'], height: 160, width: double.infinity, fit: BoxFit.cover),
+                      ),
+                      const SizedBox(height: 14),
+                    ] else ...[
+                      const Icon(Icons.confirmation_number_rounded, color: AppConstants.primaryColor, size: 48),
+                      const SizedBox(height: 12),
+                    ],
+                    Text(info['name'] ?? 'Unknown Customer', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white), textAlign: TextAlign.center),
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      decoration: BoxDecoration(color: AppConstants.primaryColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(20)),
+                      child: Text(info['category'] ?? 'General Admission', style: const TextStyle(color: AppConstants.primaryColor, fontWeight: FontWeight.bold, fontSize: 12)),
+                    ),
+                    const Divider(height: 28, color: Colors.white10),
                     _buildInfoRow('Email', info['email'] ?? '-'),
                     _buildInfoRow('Phone', info['phone'] ?? '-'),
-                    if (info['redeemed_at'] != null) ...[
-                      const Divider(height: 32, color: Colors.white10),
-                      const Text('ALREADY REDEEMED', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                    if (isAlreadyRedeemed) ...[
+                      const Divider(height: 24, color: Colors.white10),
+                      const Text('ALREADY REDEEMED', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+                      const SizedBox(height: 6),
                       _buildInfoRow('At', info['redeemed_at']),
                       _buildInfoRow('By', info['redeemed_by'] ?? 'System'),
-                      if (info['photo'] != null) ...[
-                        const SizedBox(height: 16),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: Image.network(info['photo'], height: 150, width: double.infinity, fit: BoxFit.cover),
-                        ),
-                      ],
                     ],
                   ],
                 ),
@@ -260,16 +288,8 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
           ),
           const Spacer(),
           ElevatedButton(
-            onPressed: info['redeemed_at'] != null 
-              ? _reset 
-              : () {
-                  setState(() {
-                    _showTicketInfo = false;
-                    _isTakingPhoto = true;
-                  });
-                  _startPhotoTimer();
-                },
-            child: Text(info['redeemed_at'] != null ? 'BACK TO SCAN' : 'CONTINUE TO PHOTO'),
+            onPressed: isAlreadyRedeemed ? _reset : _startPhotoFlow,
+            child: Text(isAlreadyRedeemed ? 'BACK TO SCAN' : 'CONTINUE TO PHOTO'),
           ),
         ],
       ),
@@ -286,7 +306,9 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
                 margin: const EdgeInsets.all(24),
                 clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(borderRadius: BorderRadius.circular(24)),
-                child: CameraPreview(_cameraController!),
+                child: _cameraController != null && _cameraController!.value.isInitialized
+                    ? CameraPreview(_cameraController!)
+                    : const Center(child: CircularProgressIndicator()),
               ),
             ),
             Container(
@@ -321,10 +343,10 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
             child: Container(
               decoration: BoxDecoration(
                 border: Border.all(color: AppConstants.primaryColor, width: 2),
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: BorderRadius.circular(24),
               ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(22),
                 child: Image.file(File(_personPhoto!.path), width: double.infinity, fit: BoxFit.cover),
               ),
             ),
@@ -334,13 +356,7 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
             children: [
               Expanded(
                 child: OutlinedButton(
-                  onPressed: () {
-                    setState(() {
-                      _showPhotoPreview = false;
-                      _isTakingPhoto = true;
-                    });
-                    _startPhotoTimer();
-                  },
+                  onPressed: _startPhotoFlow,
                   child: const Text('FOTO ULANG'),
                 ),
               ),
@@ -362,7 +378,7 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12)),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -387,7 +403,7 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
     final bool success = provider.isSuccess ?? false;
 
     if (success) {
-      Future.delayed(const Duration(seconds: 2), () {
+      Future.delayed(const Duration(seconds: 3), () {
         if (mounted && provider.isSuccess != null) {
           _reset();
           provider.clearStatus();
@@ -397,41 +413,66 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
 
     return Positioned.fill(
       child: Container(
-        color: Colors.black.withOpacity(0.95),
+        color: Colors.black.withValues(alpha: 0.95),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(success ? Icons.check_circle : Icons.error, color: success ? Colors.green : Colors.red, size: 80),
-            const SizedBox(height: 16),
-            Text(provider.message ?? '', style: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
-            if (!success && provider.ticketInfo != null) ...[
-              const SizedBox(height: 24),
+            Icon(success ? Icons.check_circle_rounded : Icons.error_rounded, color: success ? const Color(0xFF10B981) : const Color(0xFFEF4444), size: 72),
+            const SizedBox(height: 12),
+            Text(provider.message ?? '', style: const TextStyle(fontSize: 20, color: Colors.white, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+            
+            if (success && _personPhoto != null) ...[
+              const SizedBox(height: 18),
               Container(
-                margin: const EdgeInsets.symmetric(horizontal: 40),
+                width: double.infinity,
+                constraints: const BoxConstraints(maxHeight: 220),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.5), width: 2),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: Image.file(File(_personPhoto!.path), fit: BoxFit.cover),
+                ),
+              ),
+            ],
+
+            if (!success && provider.ticketInfo != null) ...[
+              const SizedBox(height: 18),
+              if (provider.ticketInfo!['photo'] != null)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 14),
+                  constraints: const BoxConstraints(maxHeight: 180),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.4), width: 2),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: Image.network(provider.ticketInfo!['photo'], height: 140, width: double.infinity, fit: BoxFit.cover),
+                  ),
+                ),
+              Container(
                 padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12)),
+                decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(16)),
                 child: Column(
                   children: [
                     _buildInfoRow('Time', provider.ticketInfo!['redeemed_at'] ?? '-'),
                     _buildInfoRow('By', provider.ticketInfo!['redeemed_by'] ?? 'System'),
-                    if (provider.ticketInfo!['photo'] != null) ...[
-                      const SizedBox(height: 12),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.network(provider.ticketInfo!['photo'], height: 120, width: double.infinity, fit: BoxFit.cover),
-                      ),
-                    ],
                   ],
                 ),
               ),
             ],
-            if (!success) ...[
-              const SizedBox(height: 32),
-              ElevatedButton(onPressed: () {
-                _reset();
-                provider.clearStatus();
-              }, child: const Text('CLOSE')),
-            ],
+            const SizedBox(height: 24),
+            if (!success)
+              ElevatedButton(
+                onPressed: () {
+                  _reset();
+                  provider.clearStatus();
+                }, 
+                child: const Text('CLOSE'),
+              ),
           ],
         ),
       ),
